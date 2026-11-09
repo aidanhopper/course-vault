@@ -7,7 +7,7 @@ def write_tvshow_nfo(
     series_dir: Path,
     title: str,
     overview: Optional[str] = None,
-    instructor: Optional[str] = None,
+    instructors: Optional[List[str]] = None,
     institution: Optional[str] = None,
     tags: Optional[List[str]] = None,
 ) -> Path:
@@ -20,14 +20,14 @@ def write_tvshow_nfo(
     plot_elem = ET.SubElement(root, "plot")
     plot_elem.text = overview or f"Lectures for {title}."
 
-    if instructor:
-        director = ET.SubElement(root, "director")
-        director.text = instructor
+    if instructors:
+        for inst in instructors:
+            director = ET.SubElement(root, "director")
+            director.text = inst
 
-    studio_name = institution or instructor
-    if studio_name:
+    if institution:
         studio = ET.SubElement(root, "studio")
-        studio.text = studio_name
+        studio.text = institution
 
     genre = ET.SubElement(root, "genre")
     genre.text = "Education"
@@ -53,7 +53,7 @@ def write_episode_nfo(
     episode_number: int,
     season_number: int = 1,
     plot: Optional[str] = None,
-    instructor: Optional[str] = None,
+    instructors: Optional[List[str]] = None,
     tags: Optional[List[str]] = None,
 ) -> Path:
     """Generate and write an {episode}.nfo file alongside a video for Jellyfin."""
@@ -68,9 +68,10 @@ def write_episode_nfo(
     ep_elem = ET.SubElement(root, "episode")
     ep_elem.text = str(episode_number)
 
-    if instructor:
-        director = ET.SubElement(root, "director")
-        director.text = instructor
+    if instructors:
+        for inst in instructors:
+            director = ET.SubElement(root, "director")
+            director.text = inst
 
     if plot:
         plot_elem = ET.SubElement(root, "plot")

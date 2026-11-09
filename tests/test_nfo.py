@@ -8,7 +8,7 @@ def test_write_tvshow_nfo(tmp_path: Path):
         series_dir=tmp_path,
         title="Introduction to Algorithms",
         overview="Comprehensive algorithms course.",
-        instructor="Prof. Demaine",
+        instructors=["Prof. Demaine"],
         tags=["Algorithms", "Computer Science"],
     )
     assert nfo_path.is_file()
@@ -29,6 +29,7 @@ def test_write_episode_nfo(tmp_path: Path):
         title="01. Peak Finding",
         episode_number=1,
         plot="Finding local peaks in 1D and 2D arrays.",
+        instructors=["Prof. Demaine"],
         tags=["Divide and Conquer"],
     )
     assert ep_nfo.is_file()

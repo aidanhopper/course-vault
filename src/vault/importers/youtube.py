@@ -174,7 +174,8 @@ async def process_youtube_import(
             )
             series_resource.data = {
                 "institution": cleaned_meta.institution,
-                "instructor": cleaned_meta.instructor,
+                "instructors": cleaned_meta.instructors,
+                "channel": uploader,
                 "overview": cleaned_meta.overview,
                 "folder_path": str(series_dir.relative_to(settings.MEDIA_DIR)),
             }
@@ -196,7 +197,7 @@ async def process_youtube_import(
         series_dir=series_dir,
         title=final_series_title,
         overview=cleaned_meta.overview,
-        instructor=cleaned_meta.instructor,
+        instructors=cleaned_meta.instructors,
         institution=cleaned_meta.institution,
     )
 
@@ -283,7 +284,7 @@ async def process_youtube_import(
 
                 if b_meta:
                     final_title = b_meta.title or clean_topic_title
-                    inst = b_meta.instructor
+                    inst_list = [b_meta.instructor] if b_meta.instructor else []
                     summ = b_meta.summary
                     tags = b_meta.topic_tags
                     slides = b_meta.slides_url
@@ -299,7 +300,7 @@ async def process_youtube_import(
                         series_institution=cleaned_meta.institution,
                     )
                     final_title = lecture_meta.title or clean_topic_title
-                    inst = lecture_meta.instructor
+                    inst_list = lecture_meta.instructors
                     summ = lecture_meta.summary
                     tags = lecture_meta.topic_tags
                     slides = lecture_meta.slides_url
@@ -308,7 +309,8 @@ async def process_youtube_import(
                 if existing_res:
                     existing_res.title = final_title
                     data = existing_res.data
-                    data["instructor"] = inst
+                    data["instructors"] = inst_list
+                    data.pop("instructor", None)  # Remove legacy singular field
                     data["institution"] = cleaned_meta.institution
                     data["summary"] = summ
                     data["topic_tags"] = tags
@@ -326,7 +328,7 @@ async def process_youtube_import(
                             title=final_title,
                             episode_number=idx + 1,
                             plot=summ or final_title,
-                            instructor=inst,
+                            instructors=inst_list,
                             tags=tags,
                         )
 
@@ -416,7 +418,7 @@ async def process_youtube_import(
             title=final_lecture_title,
             episode_number=idx + 1,
             plot=lecture_meta.summary or (raw_description[:1000] if raw_description else final_lecture_title),
-            instructor=lecture_meta.instructor,
+            instructors=lecture_meta.instructors,
             tags=lecture_meta.topic_tags,
         )
 
@@ -431,7 +433,7 @@ async def process_youtube_import(
         video_resource.data = {
             "duration_seconds": duration_sec,
             "file_path": str(mp4_file.relative_to(settings.MEDIA_DIR)),
-            "instructor": lecture_meta.instructor,
+            "instructors": lecture_meta.instructors,
             "institution": lecture_meta.institution,
             "summary": lecture_meta.summary,
             "topic_tags": lecture_meta.topic_tags,

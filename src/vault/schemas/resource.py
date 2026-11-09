@@ -9,6 +9,12 @@ from vault.schemas.transcript import TranscriptCueRead
 class VideoData(BaseModel):
     duration_seconds: float | None = None
     file_path: str | None = None
+    instructors: List[str] = Field(default_factory=list)
+    institution: str | None = None
+    summary: str | None = None
+    topic_tags: List[str] = Field(default_factory=list)
+    slides_url: str | None = None
+    resources_url: str | None = None
     jellyfin_item_id: str | None = None
     has_subtitles: bool = False
     has_embedded_chapters: bool = False
@@ -23,7 +29,9 @@ class SeriesItemSummary(BaseModel):
 
 
 class SeriesData(BaseModel):
-    instructor: str | None = None
+    instructors: List[str] = Field(default_factory=list)
+    institution: str | None = None
+    channel: str | None = None
     overview: str | None = None
     jellyfin_series_id: str | None = None
     items: List[SeriesItemSummary] = Field(default_factory=list)

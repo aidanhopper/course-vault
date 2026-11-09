@@ -15,14 +15,14 @@ logger = logging.getLogger(__name__)
 class CleanedSeriesResult(BaseModel):
     series_title: str
     institution: Optional[str] = None
-    instructor: Optional[str] = None
+    instructors: List[str] = Field(default_factory=list)
     overview: Optional[str] = None
     video_titles: List[str]
 
 
 class CleanedLectureResult(BaseModel):
     title: str
-    instructor: Optional[str] = None
+    instructors: List[str] = Field(default_factory=list)
     institution: Optional[str] = None
     summary: Optional[str] = None
     topic_tags: List[str] = Field(default_factory=list)
@@ -76,7 +76,8 @@ async def clean_series_metadata(
     if not settings.AI_API_KEY:
         return CleanedSeriesResult(
             series_title=fallback_series_title,
-            instructor=fallback_inst,
+            institution=uploader,
+            instructors=[fallback_inst] if fallback_inst else [],
             overview=f"Lectures for {fallback_series_title}.",
             video_titles=fallback_video_titles,
         )
@@ -97,7 +98,7 @@ Raw Lecture Titles:
 Rules:
 1. 'series_title': Clean, academic title that MUST PRESERVE the university or institution prefix and course code (e.g. 'MIT 6.7960 Deep Learning' or 'Stanford CS229 Machine Learning'). It is vital to preserve the institution and course code so courses from different universities are easily differentiated! Strip resolution tags, semester codes (like 'Fall 2024'), or generic playlist fluff.
 2. 'institution': The university or organization that produced the course (e.g. 'MIT', 'Stanford', 'Harvard', 'freeCodeCamp'). If unknown, null.
-3. 'instructor': Actual human professor / instructor name(s). Look in the description! If multiple professors are listed, join them with commas (e.g. 'Phillip Isola, Sara Beery, Jeremy Bernstein'). Do NOT use the channel name if professors are named. If not found, null.
+3. 'instructors': Array of actual human professor / instructor names (e.g. ['Phillip Isola', 'Sara Beery', 'Jeremy Bernstein']). Look in the description! Do NOT use the channel name. If not found, [].
 4. 'overview': Concise 1-2 sentence description of what the course covers.
 5. 'video_titles': Clean topic titles only, matching the exact order of the input array. Strip lecture numbers, resolution tags, and redundant prefixes (e.g. 'Introduction to Deep Learning', 'How to Train a Neural Net').
 
@@ -105,7 +106,7 @@ Respond ONLY with valid JSON in this structure:
 {{
   "series_title": "...",
   "institution": "...",
-  "instructor": "...",
+  "instructors": ["..."],
   "overview": "...",
   "video_titles": ["..."]
 }}
@@ -140,10 +141,11 @@ Respond ONLY with valid JSON in this structure:
                 logger.warning("LLM returned mismatch in video titles length; using fallback")
                 video_titles = fallback_video_titles
 
+            inst_list = parsed.get("instructors") or ([parsed["instructor"]] if parsed.get("instructor") else ([fallback_inst] if fallback_inst else []))
             return CleanedSeriesResult(
                 series_title=parsed.get("series_title") or fallback_series_title,
                 institution=parsed.get("institution"),
-                instructor=parsed.get("instructor") or fallback_inst,
+                instructors=inst_list,
                 overview=parsed.get("overview") or f"Course lectures for {fallback_series_title}.",
                 video_titles=video_titles,
             )
@@ -151,7 +153,8 @@ Respond ONLY with valid JSON in this structure:
         logger.warning(f"AI metadata cleanup failed ({e}); using regex heuristic fallback")
         return CleanedSeriesResult(
             series_title=fallback_series_title,
-            instructor=fallback_inst,
+            institution=uploader,
+            instructors=[fallback_inst] if fallback_inst else [],
             overview=f"Course lectures for {fallback_series_title}.",
             video_titles=fallback_video_titles,
         )
@@ -188,7 +191,7 @@ async def clean_lecture_metadata(
     if not settings.AI_API_KEY:
         return CleanedLectureResult(
             title=fallback_topic,
-            instructor=fallback_inst,
+            instructors=[fallback_inst] if fallback_inst else [],
             institution=series_institution,
             summary=raw_description[:300] if raw_description else None,
             topic_tags=[],
@@ -209,7 +212,7 @@ Extract structured metadata for THIS specific lecture video.
 If any field is missing or cannot be found in the description/title, set it to null or an empty list. DO NOT hallucinate.
 
 1. 'title': Clean topic title without lecture numbers or resolution tags (e.g. 'Introduction to Deep Learning').
-2. 'instructor': The specific human professor or speaker who delivered this lecture (e.g. 'Sara Beery'). If not found, null. Do NOT use the institution/channel name if no person is named.
+2. 'instructors': Array of human professors or speakers who delivered this lecture (e.g. ['Sara Beery']). If not found, []. Do NOT use the institution/channel name if no person is named.
 3. 'institution': University or organization (e.g. 'MIT'). If not found, null.
 4. 'summary': 1-2 sentence academic summary of what is taught in this specific video.
 5. 'topic_tags': 2-5 specific concept tags taught in this lecture (e.g. ['Deep Neural Networks', 'Neural Network Foundations']).
@@ -219,7 +222,7 @@ If any field is missing or cannot be found in the description/title, set it to n
 Respond ONLY with valid JSON:
 {{
   "title": "...",
-  "instructor": "...",
+  "instructors": ["..."],
   "institution": "...",
   "summary": "...",
   "topic_tags": ["..."],
@@ -260,9 +263,10 @@ Respond ONLY with valid JSON:
                 content = data["choices"][0]["message"]["content"]
                 parsed = json.loads(content)
 
+                lec_insts = parsed.get("instructors") or ([parsed["instructor"]] if parsed.get("instructor") else ([fallback_inst] if fallback_inst else []))
                 return CleanedLectureResult(
                     title=parsed.get("title") or fallback_topic,
-                    instructor=parsed.get("instructor") or fallback_inst,
+                    instructors=lec_insts,
                     institution=parsed.get("institution") or series_institution,
                     summary=parsed.get("summary"),
                     topic_tags=parsed.get("topic_tags") or [],
@@ -278,7 +282,7 @@ Respond ONLY with valid JSON:
 
     return CleanedLectureResult(
         title=fallback_topic,
-        instructor=fallback_inst,
+        instructors=[fallback_inst] if fallback_inst else [],
         institution=series_institution,
         summary=raw_description[:300] if raw_description else None,
         topic_tags=[],
