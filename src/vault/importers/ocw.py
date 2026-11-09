@@ -185,54 +185,67 @@ async def process_ocw_import(
                 await session.commit()
         return
 
-    # 2. Resolve or Create Series Resource
+    # 2. Resolve or Create Course Resource (and resolve linked Video Series)
     async with async_session_maker() as session:
-        series_res = None
+        linked_series_res = None
         if series_id:
-            series_res = await session.get(Resource, series_id)
+            res_obj = await session.get(Resource, series_id)
+            if res_obj and res_obj.type == "series":
+                linked_series_res = res_obj
 
-        # If not provided, search if a series already exists for this course
-        if not series_res:
-            stmt = select(Resource).where(Resource.type == "series")
-            all_series = (await session.exec(stmt)).all()
+        # Find existing Course resource
+        stmt_course = select(Resource).where(Resource.type == "course")
+        all_courses = (await session.exec(stmt_course)).all()
+        course_res = None
+        for c in all_courses:
+            if slug.replace("-", " ") in c.title.lower() or "6.7960" in c.title:
+                course_res = c
+                break
+
+        # Also find existing video series if not provided
+        if not linked_series_res:
+            stmt_series = select(Resource).where(Resource.type == "series")
+            all_series = (await session.exec(stmt_series)).all()
             for s in all_series:
-                folder_p = s.data.get("folder_path", "")
                 if slug.replace("-", " ") in s.title.lower() or "6.7960" in s.title:
-                    series_res = s
+                    linked_series_res = s
                     break
 
-        if not series_res:
-            # Create new Series
-            clean_title, _ = clean_series_title_fallback(slug.replace("-", " ").title())
-            final_title = title_override or clean_title
-            series_res = Resource(
-                type="series",
+        clean_title, _ = clean_series_title_fallback(slug.replace("-", " ").title())
+        final_title = title_override or (linked_series_res.title if linked_series_res else clean_title)
+
+        if not course_res:
+            course_res = Resource(
+                type="course",
                 title=final_title,
                 original_title=slug,
             )
-            series_res.data = {
+            course_res.data = {
                 "institution": "MIT",
                 "course_url": course_url,
-                "folder_path": f"Videos/{sanitize_filename(final_title)}",
+                "series_id": linked_series_res.id if linked_series_res else None,
             }
-            session.add(series_res)
+            session.add(course_res)
             await session.commit()
-            await session.refresh(series_res)
+            await session.refresh(course_res)
 
-        target_series_id = series_res.id
-        series_folder_name = sanitize_filename(series_res.title)
+        target_course_id = course_res.id
+        target_series_id = linked_series_res.id if linked_series_res else None
+        course_folder_name = sanitize_filename(course_res.title)
 
-        # Update series syllabus info if available
-        sdata = series_res.data
+        # Update course syllabus info
+        cdata = course_res.data
         if syllabus_info.get("prerequisites"):
-            sdata["prerequisites"] = syllabus_info["prerequisites"]
-        sdata["course_url"] = course_url
-        series_res.data = sdata
-        session.add(series_res)
+            cdata["prerequisites"] = syllabus_info["prerequisites"]
+        cdata["course_url"] = course_url
+        if target_series_id:
+            cdata["series_id"] = target_series_id
+        course_res.data = cdata
+        session.add(course_res)
 
         job = await session.get(Job, job_id)
         if job:
-            job.series_id = target_series_id
+            job.resource_id = target_course_id
             job.status = "downloading"
             job.total_items = total_files
             job.completed_items = 0
@@ -240,10 +253,10 @@ async def process_ocw_import(
             await session.commit()
 
     # Create target directories
-    slides_course_dir = settings.slides_dir / series_folder_name
+    slides_course_dir = settings.slides_dir / course_folder_name
     slides_course_dir.mkdir(parents=True, exist_ok=True)
 
-    docs_course_dir = settings.documents_dir / series_folder_name
+    docs_course_dir = settings.documents_dir / course_folder_name
     docs_course_dir.mkdir(parents=True, exist_ok=True)
 
     downloaded_slides: List[Dict[str, Any]] = []
@@ -260,7 +273,7 @@ async def process_ocw_import(
             lec_title = lec["title"]
             pdf_url = lec["pdf_url"]
             safe_title = sanitize_filename(lec_title)
-            filename = f"{series_folder_name} - L{lec_idx:02d} - {safe_title}.pdf"
+            filename = f"{course_folder_name} - L{lec_idx:02d} - {safe_title}.pdf"
             file_path = slides_course_dir / filename
 
             # Download if not already on disk
@@ -288,7 +301,7 @@ async def process_ocw_import(
             slide_res = Resource(
                 id=slide_res_id,
                 type="slides",
-                title=f"{series_res.title} - Lecture {lec_idx:02d} Slides: {lec_title}",
+                title=f"{course_res.title} - Lecture {lec_idx:02d} Slides: {lec_title}",
             )
             slide_res.data = {
                 "lecture_index": lec_idx,
@@ -301,7 +314,6 @@ async def process_ocw_import(
 
             async with async_session_maker() as session:
                 session.add(slide_res)
-                # Add slide outline topics
                 for top in extracted_topics:
                     t_record = Topic(
                         resource_id=slide_res_id,
@@ -313,20 +325,21 @@ async def process_ocw_import(
                     session.add(t_record)
 
                 # Pair directly with existing Video resource in series if matching order_index
-                stmt_v = select(SeriesItem).where(
-                    SeriesItem.parent_series_id == target_series_id,
-                    SeriesItem.order_index == lec_idx,
-                )
-                s_item = (await session.exec(stmt_v)).first()
-                if s_item:
-                    video_res = await session.get(Resource, s_item.child_resource_id)
-                    if video_res and video_res.type == "video":
-                        vdata = video_res.data
-                        vdata["slides_resource_id"] = slide_res_id
-                        vdata["slides_file_path"] = str(file_path.relative_to(settings.MEDIA_DIR))
-                        vdata["slides_url"] = pdf_url
-                        video_res.data = vdata
-                        session.add(video_res)
+                if target_series_id:
+                    stmt_v = select(SeriesItem).where(
+                        SeriesItem.parent_series_id == target_series_id,
+                        SeriesItem.order_index == lec_idx,
+                    )
+                    s_item = (await session.exec(stmt_v)).first()
+                    if s_item:
+                        video_res = await session.get(Resource, s_item.child_resource_id)
+                        if video_res and video_res.type == "video":
+                            vdata = video_res.data
+                            vdata["slides_resource_id"] = slide_res_id
+                            vdata["slides_file_path"] = str(file_path.relative_to(settings.MEDIA_DIR))
+                            vdata["slides_url"] = pdf_url
+                            video_res.data = vdata
+                            session.add(video_res)
 
                 await session.commit()
 
@@ -371,7 +384,7 @@ async def process_ocw_import(
             hw_res = Resource(
                 id=hw_res_id,
                 type="document",
-                title=f"{series_res.title} - {hw_title}",
+                title=f"{course_res.title} - {hw_title}",
             )
             hw_res.data = {
                 "file_format": ext.lstrip("."),
@@ -401,17 +414,23 @@ async def process_ocw_import(
                     job.progress_percent = 15.0 + (completed_count / total_files) * 80.0
                     await session.commit()
 
-    # 5. Update Series Resource manifest with all slides and homework links
+    # 5. Update Course Resource manifest with all slides and homework links
     async with async_session_maker() as session:
-        series_res = await session.get(Resource, target_series_id)
-        if series_res:
-            sdata = series_res.data
-            sdata["slides"] = downloaded_slides
-            sdata["homework"] = downloaded_homework
-            series_res.data = sdata
-            session.add(series_res)
+        course_res = await session.get(Resource, target_course_id)
+        if course_res:
+            cdata = course_res.data
+            cdata["slides"] = downloaded_slides
+            cdata["documents"] = downloaded_homework
+            course_res.data = cdata
+            session.add(course_res)
 
         job = await session.get(Job, job_id)
+        if job:
+            job.status = "completed"
+            job.progress_percent = 100.0
+            job.completed_items = total_files
+            job.current_item = None
+            await session.commit()
         if job:
             job.status = "completed"
             job.progress_percent = 100.0

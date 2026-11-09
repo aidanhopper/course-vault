@@ -1,6 +1,7 @@
 from vault.schemas.job import ImportRequest, ImportResponse, JobRead
 from vault.schemas.resource import (
     AudioData,
+    CourseData,
     DocumentData,
     ResourceBase,
     ResourceCreate,
@@ -16,6 +17,7 @@ from vault.schemas.transcript import TranscriptCueRead, parse_vtt_content, parse
 
 __all__ = [
     "AudioData",
+    "CourseData",
     "DocumentData",
     "ImportRequest",
     "ImportResponse",

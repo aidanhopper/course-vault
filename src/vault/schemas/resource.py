@@ -57,7 +57,19 @@ class AudioData(BaseModel):
     has_subtitles: bool = False
 
 
-ResourceType = Literal["video", "series", "document", "slides", "audio"]
+class CourseData(BaseModel):
+    institution: str | None = None
+    channel: str | None = None
+    instructors: List[str] = Field(default_factory=list)
+    overview: str | None = None
+    prerequisites: str | None = None
+    course_url: str | None = None
+    series_id: str | None = None  # Reference to the ordered video series
+    slides: List[Dict[str, Any]] = Field(default_factory=list)
+    documents: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+ResourceType = Literal["course", "series", "video", "document", "slides", "audio"]
 
 
 class ResourceBase(BaseModel):
