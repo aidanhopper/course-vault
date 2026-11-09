@@ -68,21 +68,17 @@ uv run pytest
 - `GET /api/v1/jobs/{job_id}` — Check status, progress %, and current item.
 - `POST /api/v1/jobs/{job_id}/cancel` — Cancel active import job.
 
-### Resources
+### Resources (Unified Endpoints)
 - `GET /api/v1/resources` — List resources (optional `?type=video|series|document|slides`).
+- `POST /api/v1/resources` — Create a resource (e.g. create a series or document).
 - `GET /api/v1/resources/{id}` — Get resource details (supports `?include=topics,transcript,source_metadata,items`).
 - `GET /api/v1/resources/{id}/topics` — Get topic breakdown with start/end seconds or pages.
 - `GET /api/v1/resources/{id}/transcript?format=json|text|vtt` — Get captions/transcript in JSON, plain text, or WebVTT.
 - `GET /api/v1/resources/{id}/source-metadata` — Raw upstream provider metadata dictionary.
 - `GET /api/v1/resources/{id}/media` — Direct byte-range stream of the video/audio/PDF file.
+- `POST /api/v1/resources/{id}/items` — Link a child resource into an ordered series: `{"resource_id": "res_...", "order_index": 1}`.
+- `DELETE /api/v1/resources/{id}/items/{child_id}` — Unlink a child resource from a series.
 - `DELETE /api/v1/resources/{id}` — Permanently delete resource and associated media file.
-
-### Series (Convenience Endpoints)
-- `GET /api/v1/series` — List all ordered series.
-- `GET /api/v1/series/{id}` — Get series with ordered list of child items.
-- `POST /api/v1/series` — Create an empty series.
-- `POST /api/v1/series/{id}/items` — Link an existing resource into a series at an order index.
-- `DELETE /api/v1/series/{id}/items/{resource_id}` — Unlink a resource from a series.
 
 ---
 

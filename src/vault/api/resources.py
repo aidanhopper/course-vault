@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
+from pydantic import BaseModel
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -8,11 +9,16 @@ from vault.config import settings
 from vault.db.models import Resource, SeriesItem, SourceMetadata, Topic, TranscriptCue
 from vault.db.session import get_session
 from vault.media.streamer import stream_media_file
-from vault.schemas.resource import ResourceRead
+from vault.schemas.resource import ResourceCreate, ResourceRead
 from vault.schemas.topic import TopicRead
 from vault.schemas.transcript import TranscriptCueRead
 
 router = APIRouter(prefix="/resources", tags=["Resources"])
+
+
+class AddResourceItemRequest(BaseModel):
+    resource_id: str
+    order_index: int
 
 
 @router.get("", response_model=List[ResourceRead], summary="List resources")
@@ -41,6 +47,33 @@ async def list_resources(
         )
         results.append(read_obj)
     return results
+
+
+@router.post("", response_model=ResourceRead, status_code=status.HTTP_201_CREATED, summary="Create a resource")
+async def create_resource(
+    req: ResourceCreate,
+    session: AsyncSession = Depends(get_session),
+) -> ResourceRead:
+    resource = Resource(
+        type=req.type,
+        title=req.title,
+        original_title=req.original_title or req.title,
+    )
+    resource.data = req.data
+    session.add(resource)
+    await session.commit()
+    await session.refresh(resource)
+
+    return ResourceRead(
+        id=resource.id,
+        type=resource.type,
+        title=resource.title,
+        original_title=resource.original_title,
+        data=resource.data,
+        created_at=resource.created_at,
+        updated_at=resource.updated_at,
+        items=[],
+    )
 
 
 @router.get("/{resource_id}", response_model=ResourceRead, summary="Get resource by ID")
@@ -227,3 +260,57 @@ async def delete_resource(
     await session.delete(resource)
     await session.commit()
     return {"message": f"Resource {resource_id} deleted successfully"}
+
+
+@router.post("/{resource_id}/items", status_code=status.HTTP_201_CREATED, summary="Add child resource to series")
+async def add_child_resource_item(
+    resource_id: str,
+    req: AddResourceItemRequest,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    parent = await session.get(Resource, resource_id)
+    if not parent:
+        raise HTTPException(status_code=404, detail=f"Parent resource {resource_id} not found")
+
+    child = await session.get(Resource, req.resource_id)
+    if not child:
+        raise HTTPException(status_code=404, detail=f"Child resource {req.resource_id} not found")
+
+    stmt = select(SeriesItem).where(
+        SeriesItem.parent_series_id == resource_id,
+        SeriesItem.child_resource_id == req.resource_id,
+    )
+    existing = (await session.exec(stmt)).first()
+    if existing:
+        existing.order_index = req.order_index
+    else:
+        s_item = SeriesItem(
+            parent_series_id=resource_id,
+            child_resource_id=req.resource_id,
+            order_index=req.order_index,
+        )
+        session.add(s_item)
+
+    await session.commit()
+    return {
+        "message": f"Resource {req.resource_id} linked to parent {resource_id} at position {req.order_index}"
+    }
+
+
+@router.delete("/{resource_id}/items/{child_resource_id}", summary="Remove child resource from series")
+async def remove_child_resource_item(
+    resource_id: str,
+    child_resource_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    stmt = select(SeriesItem).where(
+        SeriesItem.parent_series_id == resource_id,
+        SeriesItem.child_resource_id == child_resource_id,
+    )
+    item = (await session.exec(stmt)).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Child resource link not found in series")
+
+    await session.delete(item)
+    await session.commit()
+    return {"message": f"Resource {child_resource_id} unlinked from {resource_id}"}

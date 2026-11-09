@@ -17,15 +17,15 @@ The **Course Resource Vault** is a single-process, async-first Python applicatio
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                            FastAPI Application                              │
 │                                                                             │
-│  ┌───────────────────┐    ┌────────────────────┐    ┌────────────────────┐  │
-│  │   /api/v1/imports │    │ /api/v1/resources  │    │   /api/v1/series   │  │
-│  └─────────┬─────────┘    └──────────┬─────────┘    └──────────┬─────────┘  │
-│            │                         │                         │            │
-│            ▼                         ▼                         ▼            │
-│  ┌───────────────────┐    ┌────────────────────┐    ┌────────────────────┐  │
-│  │   Job Runner      │    │ Byte-Range Streamer│    │ Aspect Resolvers   │  │
-│  │  (asyncio.Queue)  │    │  (HTTP 206 Media)  │    │ (topics/transcript)│  │
-│  └─────────┬─────────┘    └──────────┬─────────┘    └──────────┬─────────┘  │
+│  ┌───────────────────────────────────┐    ┌──────────────────────────────┐  │
+│  │          /api/v1/imports          │    │      /api/v1/resources       │  │
+│  └─────────────────┬─────────────────┘    └──────────────┬───────────────┘  │
+│                    │                                     │                  │
+│                    ▼                                     ▼                  │
+│  ┌───────────────────────────────────┐    ┌──────────────────────────────┐  │
+│  │            Job Runner             │    │     Byte-Range Streamer      │  │
+│  │          (asyncio.Queue)          │    │     & Aspect Resolvers       │  │
+│  └─────────────────┬─────────────────┘    └──────────────┬───────────────┘  │
 │            │                         │                         │            │
 │            ▼                         │                         │            │
 │  ┌───────────────────┐               │                         │            │
@@ -96,8 +96,7 @@ course-platform/
 │       │   ├── __init__.py
 │       │   ├── router.py        # /api/v1 aggregator
 │       │   ├── imports.py       # POST /imports, GET /jobs/{id}
-│       │   ├── resources.py     # GET /resources and sub-aspects (/topics, /transcript, /media)
-│       │   └── series.py        # Series convenience routes
+│       │   └── resources.py     # All /resources endpoints, items, and aspects
 │       ├── importers/
 │       │   ├── __init__.py
 │       │   ├── router.py        # URL discriminator (YouTube vs PDF vs Audio)

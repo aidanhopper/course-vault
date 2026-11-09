@@ -211,11 +211,13 @@ The database is built on **SQLite** with **aiosqlite / SQLModel**:
 
 ### Resources (Universal Endpoints)
 - `GET /api/v1/resources`
-  - List resources. Supports filter: `?type=series`, `?type=video`, `?type=document`
+  - List resources. Supports filter: `?type=series`, `?type=video`, `?type=document`, etc.
+- `POST /api/v1/resources`
+  - Create a resource (e.g. create a series or document).
 - `GET /api/v1/resources/{id}`
   - Returns core envelope + `data` block.
 - `GET /api/v1/resources/{id}?include=topics,transcript,source_metadata,items`
-  - Single-trip composite call hydrating requested aspects.
+  - Single-trip composite call hydrating requested aspects (including child items if series).
 - `GET /api/v1/resources/{id}/topics`
   - Returns topic segments with time ranges or page ranges.
 - `GET /api/v1/resources/{id}/transcript?format=json|text|vtt`
@@ -224,14 +226,12 @@ The database is built on **SQLite** with **aiosqlite / SQLModel**:
   - Returns raw unadulterated source provider dictionary (e.g. `yt-dlp` info JSON).
 - `GET /api/v1/resources/{id}/media`
   - Direct HTTP byte-range stream (`206 Partial Content`) of the video, audio, or document file.
+- `POST /api/v1/resources/{id}/items`
+  - Add child resource to an ordered series: `{"resource_id": "res_...", "order_index": 3}`.
+- `DELETE /api/v1/resources/{id}/items/{child_resource_id}`
+  - Remove child resource from an ordered series (does not delete the child resource).
 - `DELETE /api/v1/resources/{id}`
   - Permanently purges the resource and its underlying file from disk.
-
-### Series Convenience Endpoints
-- `GET /api/v1/series` &rarr; Alias for `GET /api/v1/resources?type=series`
-- `GET /api/v1/series/{id}` &rarr; Returns series details with ordered child resources
-- `POST /api/v1/series/{id}/items` &rarr; Add an existing resource to this series: `{"resource_id": "res_...", "order_index": 3}`
-- `DELETE /api/v1/series/{id}/items/{resource_id}` &rarr; Remove a resource from this series
 
 ---
 

@@ -25,13 +25,16 @@ async def test_health():
 async def test_series_and_resources_endpoints():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # 1. Create a Series
+        # 1. Create a Series as a Resource
         resp = await client.post(
-            "/api/v1/series",
+            "/api/v1/resources",
             json={
+                "type": "series",
                 "title": "Introduction to Computer Science",
-                "instructor": "David Malan",
-                "overview": "CS50 entry course.",
+                "data": {
+                    "instructor": "David Malan",
+                    "overview": "CS50 entry course.",
+                },
             },
         )
         assert resp.status_code == 201
@@ -74,13 +77,13 @@ async def test_series_and_resources_endpoints():
 
         # 3. Link video to series
         link_resp = await client.post(
-            f"/api/v1/series/{series_id}/items",
+            f"/api/v1/resources/{series_id}/items",
             json={"resource_id": video_id, "order_index": 1},
         )
         assert link_resp.status_code == 201
 
-        # 4. Fetch Series detail
-        series_detail = await client.get(f"/api/v1/series/{series_id}")
+        # 4. Fetch Series detail with items
+        series_detail = await client.get(f"/api/v1/resources/{series_id}?include=items")
         assert series_detail.status_code == 200
         detail_data = series_detail.json()
         assert len(detail_data["items"]) == 1
@@ -126,7 +129,7 @@ async def test_series_and_resources_endpoints():
         assert any(s["id"] == series_id for s in list_series.json())
 
         # 9. Test unlinking item from series
-        unlink_resp = await client.delete(f"/api/v1/series/{series_id}/items/{video_id}")
+        unlink_resp = await client.delete(f"/api/v1/resources/{series_id}/items/{video_id}")
         assert unlink_resp.status_code == 200
 
         # Video should still exist independently
