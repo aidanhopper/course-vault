@@ -33,7 +33,7 @@ class Resource(SQLModel, table=True):
 
     @data.setter
     def data(self, value: Dict[str, Any]) -> None:
-        self.data_json = json.dumps(value)
+        self.data_json = json.dumps(value, default=str)
 
 
 class SeriesItem(SQLModel, table=True):
@@ -90,7 +90,12 @@ class SourceMetadata(SQLModel, table=True):
 
     @raw_payload.setter
     def raw_payload(self, value: Dict[str, Any]) -> None:
-        self.raw_payload_json = json.dumps(value)
+        try:
+            import yt_dlp
+            value = yt_dlp.YoutubeDL().sanitize_info(value)
+        except Exception:
+            pass
+        self.raw_payload_json = json.dumps(value, default=str)
 
 
 class Job(SQLModel, table=True):

@@ -30,6 +30,18 @@ def is_playlist_url(url: str) -> bool:
     return ("list=" in url and "list=RD" not in url) or "/playlist" in url
 
 
+def normalize_youtube_url(url: str) -> str:
+    """Normalizes watch?v=...&list=... into a clean playlist URL if a playlist is present."""
+    import urllib.parse
+    if is_playlist_url(url):
+        parsed = urllib.parse.urlparse(url)
+        qs = urllib.parse.parse_qs(parsed.query)
+        list_id = qs.get("list", [None])[0]
+        if list_id and not list_id.startswith("RD"):
+            return f"https://www.youtube.com/playlist?list={list_id}"
+    return url
+
+
 def extract_youtube_info_flat(url: str) -> Dict[str, Any]:
     """Fast synchronous flat extraction of playlist or video metadata."""
     ydl_opts = {
@@ -83,6 +95,8 @@ async def process_youtube_import(
     is_cancelled_func: Optional[Callable[[], bool]] = None,
 ) -> None:
     """Full background import workflow for YouTube playlists and single videos."""
+    url = normalize_youtube_url(url)
+
     async with async_session_maker() as session:
         job = await session.get(Job, job_id)
         if not job:
@@ -331,7 +345,11 @@ async def process_youtube_import(
                 source_url=video_url,
                 source_id=video_id,
             )
-            src_meta.raw_payload = dl_info or entry
+            try:
+                sanitized_payload = yt_dlp.YoutubeDL().sanitize_info(dl_info or entry)
+            except Exception:
+                sanitized_payload = entry
+            src_meta.raw_payload = sanitized_payload
             session.add(src_meta)
 
             # Parse Chapters into Topics
