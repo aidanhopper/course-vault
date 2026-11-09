@@ -21,7 +21,7 @@ class AddResourceItemRequest(BaseModel):
     order_index: int
 
 
-@router.get("", response_model=List[ResourceRead], summary="List resources")
+@router.get("", response_model=List[ResourceRead], response_model_exclude_none=True, summary="List resources")
 async def list_resources(
     type: Optional[str] = Query(None, description="Filter by resource type (video, series, document, slides, audio)"),
     limit: int = Query(100, ge=1, le=500),
@@ -49,7 +49,7 @@ async def list_resources(
     return results
 
 
-@router.post("", response_model=ResourceRead, status_code=status.HTTP_201_CREATED, summary="Create a resource")
+@router.post("", response_model=ResourceRead, response_model_exclude_none=True, status_code=status.HTTP_201_CREATED, summary="Create a resource")
 async def create_resource(
     req: ResourceCreate,
     session: AsyncSession = Depends(get_session),
@@ -76,7 +76,7 @@ async def create_resource(
     )
 
 
-@router.get("/{resource_id}", response_model=ResourceRead, summary="Get resource by ID")
+@router.get("/{resource_id}", response_model=ResourceRead, response_model_exclude_none=True, summary="Get resource by ID")
 async def get_resource(
     resource_id: str,
     include: Optional[str] = Query(
@@ -103,9 +103,18 @@ async def get_resource(
 
     # 1. Hydrate topics
     if "topics" in aspects:
-        stmt = select(Topic).where(Topic.resource_id == resource_id).order_by(Topic.order_index)
-        topics = (await session.exec(stmt)).all()
-        res_read.topics = [TopicRead.model_validate(t) for t in topics]
+        if resource.type == "series":
+            stmt_items = select(SeriesItem).where(SeriesItem.parent_series_id == resource_id).order_by(SeriesItem.order_index)
+            s_items = (await session.exec(stmt_items)).all()
+            all_topics = []
+            for s_it in s_items:
+                stmt_t = select(Topic).where(Topic.resource_id == s_it.child_resource_id).order_by(Topic.order_index)
+                all_topics.extend((await session.exec(stmt_t)).all())
+            res_read.topics = [TopicRead.model_validate(t) for t in all_topics]
+        else:
+            stmt = select(Topic).where(Topic.resource_id == resource_id).order_by(Topic.order_index)
+            topics = (await session.exec(stmt)).all()
+            res_read.topics = [TopicRead.model_validate(t) for t in topics]
 
     # 2. Hydrate transcript cues
     if "transcript" in aspects:
@@ -141,6 +150,8 @@ async def get_resource(
                     "data": child.data,
                 })
         res_read.items = item_list
+        # Also keep items inside data["items"] for type-specific purity
+        res_read.data["items"] = item_list
 
     return res_read
 
