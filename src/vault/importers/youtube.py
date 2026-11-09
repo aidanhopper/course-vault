@@ -248,8 +248,47 @@ async def process_youtube_import(
                         existing_res_id = existing_res.id
 
         if existing_res_id:
-            # Re-use existing resource
+            # Re-use existing video file, but refresh and ensure metadata and NFO are up-to-date
             async with async_session_maker() as session:
+                existing_res = await session.get(Resource, existing_res_id)
+                stmt_src = select(SourceMetadata).where(SourceMetadata.resource_id == existing_res_id)
+                src_meta_rec = (await session.exec(stmt_src)).first()
+
+                raw_desc = (src_meta_rec.raw_payload.get("description") if src_meta_rec else "") or ""
+                lecture_meta = await clean_lecture_metadata(
+                    raw_title=clean_title,
+                    raw_description=raw_desc,
+                    channel=uploader,
+                    series_institution=cleaned_meta.institution,
+                )
+
+                if existing_res:
+                    final_title = lecture_meta.title or clean_topic_title
+                    existing_res.title = final_title
+                    data = existing_res.data
+                    data["instructor"] = lecture_meta.instructor
+                    data["institution"] = lecture_meta.institution
+                    data["summary"] = lecture_meta.summary
+                    data["topic_tags"] = lecture_meta.topic_tags
+                    data["slides_url"] = lecture_meta.slides_url
+                    data["resources_url"] = lecture_meta.resources_url
+                    existing_res.data = data
+                    session.add(existing_res)
+
+                    # Update episode.nfo file if present
+                    rel_p = data.get("file_path")
+                    if rel_p:
+                        nfo_p = (settings.MEDIA_DIR / rel_p).with_suffix(".nfo")
+                        write_episode_nfo(
+                            nfo_path=nfo_p,
+                            title=final_title,
+                            episode_number=idx + 1,
+                            plot=lecture_meta.summary or (raw_desc[:1000] if raw_desc else final_title),
+                            instructor=lecture_meta.instructor,
+                            tags=lecture_meta.topic_tags,
+                        )
+
+                # Ensure linked to this series
                 stmt_item = select(SeriesItem).where(
                     SeriesItem.parent_series_id == series_resource.id,
                     SeriesItem.child_resource_id == existing_res_id,
