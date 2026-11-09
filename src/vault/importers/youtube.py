@@ -1,0 +1,381 @@
+import asyncio
+import glob
+import logging
+import os
+import shutil
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
+import yt_dlp
+from sqlmodel import select
+
+from vault.ai.cleaner import clean_series_metadata
+from vault.ai.fallback import clean_title_fallback, sanitize_filename
+from vault.config import settings
+from vault.db.models import Job, Resource, SeriesItem, SourceMetadata, Topic, TranscriptCue, generate_id
+from vault.db.session import async_session_maker
+from vault.jellyfin.client import trigger_jellyfin_refresh
+from vault.jellyfin.nfo import write_episode_nfo, write_tvshow_nfo
+from vault.schemas.transcript import parse_vtt_content
+
+logger = logging.getLogger(__name__)
+
+
+def is_youtube_url(url: str) -> bool:
+    """Checks if a URL is from YouTube."""
+    return any(domain in url for domain in ("youtube.com", "youtu.be"))
+
+
+def is_playlist_url(url: str) -> bool:
+    """Checks if a URL points to a playlist rather than a single video."""
+    return ("list=" in url and "list=RD" not in url) or "/playlist" in url
+
+
+def extract_youtube_info_flat(url: str) -> Dict[str, Any]:
+    """Fast synchronous flat extraction of playlist or video metadata."""
+    ydl_opts = {
+        "extract_flat": True,
+        "skip_download": True,
+        "quiet": True,
+        "no_warnings": True,
+        "ignoreerrors": True,
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+        return info or {}
+
+
+def download_single_youtube_video(
+    video_url: str,
+    output_stem: Path,
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+) -> Dict[str, Any]:
+    """Downloads one video with mp4 merge, vtt subtitles, embedded chapters, and thumbnails."""
+    outtmpl = f"{output_stem}.%(ext)s"
+
+    ydl_opts: Dict[str, Any] = {
+        "format": "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b",
+        "merge_output_format": "mp4",
+        "outtmpl": outtmpl,
+        "writesubtitles": True,
+        "writeautomaticsub": True,
+        "subtitleslangs": ["en.*", "en"],
+        "subtitlesformat": "vtt",
+        "embedchapters": True,
+        "writethumbnail": True,
+        "quiet": True,
+        "no_warnings": True,
+        "ignoreerrors": True,
+    }
+
+    if progress_callback:
+        ydl_opts["progress_hooks"] = [progress_callback]
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(video_url, download=True)
+        return info or {}
+
+
+async def process_youtube_import(
+    job_id: str,
+    url: str,
+    target_series_id: Optional[str] = None,
+    title_override: Optional[str] = None,
+    is_cancelled_func: Optional[Callable[[], bool]] = None,
+) -> None:
+    """Full background import workflow for YouTube playlists and single videos."""
+    async with async_session_maker() as session:
+        job = await session.get(Job, job_id)
+        if not job:
+            return
+        job.status = "extracting"
+        job.progress_percent = 5.0
+        await session.commit()
+
+    # 1. Flat metadata extraction in worker thread
+    try:
+        raw_info = await asyncio.to_thread(extract_youtube_info_flat, url)
+    except Exception as e:
+        logger.error(f"Failed to inspect YouTube URL {url}: {e}")
+        async with async_session_maker() as session:
+            job = await session.get(Job, job_id)
+            if job:
+                job.status = "failed"
+                job.error_message = f"Metadata extraction failed: {str(e)}"
+                await session.commit()
+        return
+
+    # Check for playlist entries vs single video
+    entries: List[Dict[str, Any]] = []
+    if "entries" in raw_info and raw_info["entries"]:
+        entries = [e for e in raw_info["entries"] if e]
+        raw_series_title = raw_info.get("title") or "YouTube Course"
+        uploader = raw_info.get("uploader") or raw_info.get("channel")
+    else:
+        # Single video treated as a 1-entry list
+        entries = [raw_info]
+        raw_series_title = raw_info.get("title") or "YouTube Lecture"
+        uploader = raw_info.get("uploader") or raw_info.get("channel")
+
+    if not entries:
+        async with async_session_maker() as session:
+            job = await session.get(Job, job_id)
+            if job:
+                job.status = "failed"
+                job.error_message = "No downloadable videos found in URL"
+                await session.commit()
+        return
+
+    # 2. AI Metadata Cleanup
+    async with async_session_maker() as session:
+        job = await session.get(Job, job_id)
+        if job:
+            job.status = "cleaning"
+            job.progress_percent = 10.0
+            await session.commit()
+
+    raw_video_titles = [e.get("title") or f"Lecture {idx + 1}" for idx, e in enumerate(entries)]
+    cleaned_meta = await clean_series_metadata(
+        raw_series_title=title_override or raw_series_title,
+        raw_video_titles=raw_video_titles,
+        instructor_hint=uploader,
+    )
+
+    final_series_title = title_override or cleaned_meta.series_title
+    clean_folder_name = sanitize_filename(final_series_title)
+    series_dir = settings.lectures_dir / clean_folder_name
+    series_dir.mkdir(parents=True, exist_ok=True)
+
+    # 3. Create or resolve Series Resource
+    async with async_session_maker() as session:
+        series_resource = None
+        if target_series_id:
+            series_resource = await session.get(Resource, target_series_id)
+
+        if not series_resource:
+            series_resource = Resource(
+                type="series",
+                title=final_series_title,
+                original_title=raw_series_title,
+            )
+            series_resource.data = {
+                "instructor": cleaned_meta.instructor,
+                "overview": cleaned_meta.overview,
+                "folder_path": str(series_dir.relative_to(settings.MEDIA_DIR)),
+            }
+            session.add(series_resource)
+            await session.commit()
+            await session.refresh(series_resource)
+
+        job = await session.get(Job, job_id)
+        if job:
+            job.series_id = series_resource.id
+            job.status = "downloading"
+            job.total_items = len(entries)
+            job.completed_items = 0
+            job.progress_percent = 15.0
+            await session.commit()
+
+    # Write tvshow.nfo for Jellyfin
+    write_tvshow_nfo(
+        series_dir=series_dir,
+        title=final_series_title,
+        overview=cleaned_meta.overview,
+        instructor=cleaned_meta.instructor,
+    )
+
+    # 4. Download and process each video sequentially
+    total_videos = len(entries)
+    for idx, entry in enumerate(entries):
+        if is_cancelled_func and is_cancelled_func():
+            logger.info(f"Job {job_id} cancelled by user")
+            async with async_session_maker() as session:
+                job = await session.get(Job, job_id)
+                if job:
+                    job.status = "cancelled"
+                    await session.commit()
+            return
+
+        video_id = entry.get("id")
+        video_url = entry.get("url") or f"https://www.youtube.com/watch?v={video_id}"
+        clean_title = (
+            cleaned_meta.video_titles[idx]
+            if idx < len(cleaned_meta.video_titles)
+            else clean_title_fallback(entry.get("title") or f"Lecture {idx + 1}", index=idx + 1)
+        )
+        safe_video_name = sanitize_filename(clean_title)
+
+        # Update job progress
+        async with async_session_maker() as session:
+            job = await session.get(Job, job_id)
+            if job:
+                job.current_item = clean_title
+                job.progress_percent = 15.0 + (idx / total_videos) * 80.0
+                await session.commit()
+
+        # Check deduplication: does this video already exist in DB with a file on disk?
+        existing_res_id: Optional[str] = None
+        async with async_session_maker() as session:
+            stmt = select(SourceMetadata).where(
+                SourceMetadata.provider == "youtube",
+                SourceMetadata.source_id == video_id,
+            )
+            res = (await session.exec(stmt)).first()
+            if res:
+                existing_res = await session.get(Resource, res.resource_id)
+                if existing_res:
+                    rel_path = existing_res.data.get("file_path")
+                    if rel_path and (settings.MEDIA_DIR / rel_path).is_file():
+                        existing_res_id = existing_res.id
+
+        if existing_res_id:
+            # Re-use existing resource
+            async with async_session_maker() as session:
+                # Add series item join if not already present
+                stmt_item = select(SeriesItem).where(
+                    SeriesItem.parent_series_id == series_resource.id,
+                    SeriesItem.child_resource_id == existing_res_id,
+                )
+                if not (await session.exec(stmt_item)).first():
+                    s_item = SeriesItem(
+                        parent_series_id=series_resource.id,
+                        child_resource_id=existing_res_id,
+                        order_index=idx + 1,
+                    )
+                    session.add(s_item)
+
+                job = await session.get(Job, job_id)
+                if job:
+                    job.completed_items = idx + 1
+                    await session.commit()
+            continue
+
+        # Target file stem for Jellyfin naming: {Series Title} - E{XX} - {Clean Title}
+        episode_stem = series_dir / f"{clean_folder_name} - E{idx + 1:02d} - {safe_video_name}"
+
+        # Download with yt-dlp in worker thread
+        try:
+            dl_info = await asyncio.to_thread(
+                download_single_youtube_video,
+                video_url=video_url,
+                output_stem=episode_stem,
+            )
+        except Exception as e:
+            logger.warning(f"Error downloading video {video_id} ({clean_title}): {e}")
+            continue
+
+        # Locate the downloaded media file (.mp4 or other)
+        mp4_file = Path(f"{episode_stem}.mp4")
+        if not mp4_file.is_file():
+            # Check for any extension matched
+            matched_files = glob.glob(f"{glob.escape(str(episode_stem))}.*")
+            media_matches = [
+                Path(p) for p in matched_files
+                if Path(p).suffix.lower() in (".mp4", ".mkv", ".webm", ".m4v")
+            ]
+            if media_matches:
+                mp4_file = media_matches[0]
+            else:
+                logger.warning(f"No media file found after download for {episode_stem}")
+                continue
+
+        # Check for subtitles (.vtt)
+        has_subtitles = False
+        vtt_matches = glob.glob(f"{glob.escape(str(episode_stem))}*.vtt")
+        vtt_file: Optional[Path] = None
+        if vtt_matches:
+            vtt_file = Path(vtt_matches[0])
+            has_subtitles = True
+
+        duration_sec = dl_info.get("duration") or entry.get("duration")
+        raw_description = dl_info.get("description") or ""
+
+        # Write episode.nfo for Jellyfin
+        nfo_path = Path(f"{episode_stem}.nfo")
+        write_episode_nfo(
+            nfo_path=nfo_path,
+            title=clean_title,
+            episode_number=idx + 1,
+            plot=raw_description[:1000] if raw_description else clean_title,
+        )
+
+        # Create Resource in DB
+        video_resource_id = generate_id("res")
+        video_resource = Resource(
+            id=video_resource_id,
+            type="video",
+            title=clean_title,
+            original_title=entry.get("title") or clean_title,
+        )
+        video_resource.data = {
+            "duration_seconds": duration_sec,
+            "file_path": str(mp4_file.relative_to(settings.MEDIA_DIR)),
+            "has_subtitles": has_subtitles,
+            "has_embedded_chapters": bool(dl_info.get("chapters")),
+        }
+
+        async with async_session_maker() as session:
+            session.add(video_resource)
+
+            # Link to Series
+            s_item = SeriesItem(
+                parent_series_id=series_resource.id,
+                child_resource_id=video_resource_id,
+                order_index=idx + 1,
+            )
+            session.add(s_item)
+
+            # Save SourceMetadata
+            src_meta = SourceMetadata(
+                resource_id=video_resource_id,
+                provider="youtube",
+                source_url=video_url,
+                source_id=video_id,
+            )
+            src_meta.raw_payload = dl_info or entry
+            session.add(src_meta)
+
+            # Parse Chapters into Topics
+            chapters = dl_info.get("chapters") or []
+            for ch_idx, ch in enumerate(chapters):
+                topic = Topic(
+                    resource_id=video_resource_id,
+                    title=ch.get("title") or f"Topic {ch_idx + 1}",
+                    start_seconds=float(ch.get("start_time", 0)),
+                    end_seconds=float(ch.get("end_time", 0)),
+                    order_index=ch_idx + 1,
+                )
+                session.add(topic)
+
+            # Parse Subtitles into Transcript Cues
+            if vtt_file and vtt_file.is_file():
+                try:
+                    vtt_text = vtt_file.read_text(encoding="utf-8", errors="replace")
+                    cues = parse_vtt_content(vtt_text)
+                    for cue in cues:
+                        cue_record = TranscriptCue(
+                            resource_id=video_resource_id,
+                            start_seconds=cue.start_seconds,
+                            end_seconds=cue.end_seconds,
+                            text=cue.text,
+                        )
+                        session.add(cue_record)
+                except Exception as e:
+                    logger.warning(f"Could not parse VTT transcript for {video_id}: {e}")
+
+            # Update job item count
+            job = await session.get(Job, job_id)
+            if job:
+                job.completed_items = idx + 1
+                await session.commit()
+
+    # 5. Mark Job as Completed
+    async with async_session_maker() as session:
+        job = await session.get(Job, job_id)
+        if job:
+            job.status = "completed"
+            job.progress_percent = 100.0
+            job.current_item = None
+            await session.commit()
+
+    # 6. Trigger Jellyfin library refresh if configured
+    await trigger_jellyfin_refresh()

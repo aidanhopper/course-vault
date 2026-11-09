@@ -1,0 +1,84 @@
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from vault.db.models import Job
+from vault.db.session import get_session
+from vault.schemas.job import ImportRequest, ImportResponse, JobRead
+from vault.workers.queue import job_queue
+
+router = APIRouter(prefix="", tags=["Imports & Jobs"])
+
+
+@router.post(
+    "/imports",
+    response_model=ImportResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Submit URL for ingestion",
+    description="Submits a YouTube playlist, single video, or document PDF for background ingestion.",
+)
+async def create_import(
+    request: ImportRequest,
+    session: AsyncSession = Depends(get_session),
+) -> ImportResponse:
+    if not request.url.strip():
+        raise HTTPException(status_code=400, detail="URL cannot be empty")
+
+    job = Job(
+        series_id=request.series_id,
+        status="queued",
+    )
+    session.add(job)
+    await session.commit()
+    await session.refresh(job)
+
+    # Enqueue background task
+    await job_queue.enqueue(
+        job_id=job.id,
+        url=request.url,
+        series_id=request.series_id,
+        title_override=request.title_override,
+    )
+
+    return ImportResponse(
+        job_id=job.id,
+        series_id=job.series_id,
+        status=job.status,
+    )
+
+
+@router.get(
+    "/jobs/{job_id}",
+    response_model=JobRead,
+    summary="Get import job progress",
+    description="Polls the status, progress %, and active step of an import task.",
+)
+async def get_job_status(
+    job_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> JobRead:
+    job = await session.get(Job, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    return JobRead.model_validate(job)
+
+
+@router.post(
+    "/jobs/{job_id}/cancel",
+    summary="Cancel active import job",
+)
+async def cancel_job(
+    job_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    job = await session.get(Job, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    if job.status in ("completed", "failed", "cancelled"):
+        return {"status": job.status, "message": f"Job is already {job.status}"}
+
+    job_queue.cancel(job_id)
+    job.status = "cancelled"
+    await session.commit()
+    return {"status": "cancelled", "message": f"Job {job_id} cancelled"}
