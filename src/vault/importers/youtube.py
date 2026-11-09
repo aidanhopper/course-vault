@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, List, Optional
 import yt_dlp
 from sqlmodel import select
 
-from vault.ai.cleaner import clean_series_metadata
+from vault.ai.cleaner import clean_lecture_metadata, clean_series_metadata
 from vault.ai.fallback import clean_title_fallback, sanitize_filename
 from vault.config import settings
 from vault.db.models import Job, Resource, SeriesItem, SourceMetadata, Topic, TranscriptCue, generate_id
@@ -152,6 +152,7 @@ async def process_youtube_import(
         raw_series_title=title_override or raw_series_title,
         raw_video_titles=raw_video_titles,
         instructor_hint=uploader,
+        playlist_description=raw_info.get("description"),
     )
 
     final_series_title = title_override or cleaned_meta.series_title
@@ -318,13 +319,24 @@ async def process_youtube_import(
         duration_sec = dl_info.get("duration") or entry.get("duration")
         raw_description = dl_info.get("description") or ""
 
+        # Extract rich per-lecture metadata (specific professor, summary, topics, slides)
+        lecture_meta = await clean_lecture_metadata(
+            raw_title=clean_title,
+            raw_description=raw_description,
+            channel=uploader,
+            series_institution=cleaned_meta.institution,
+        )
+        final_lecture_title = lecture_meta.title or clean_topic_title
+
         # Write episode.nfo for Jellyfin
         nfo_path = Path(f"{episode_stem}.nfo")
         write_episode_nfo(
             nfo_path=nfo_path,
-            title=clean_topic_title,
+            title=final_lecture_title,
             episode_number=idx + 1,
-            plot=raw_description[:1000] if raw_description else clean_topic_title,
+            plot=lecture_meta.summary or (raw_description[:1000] if raw_description else final_lecture_title),
+            instructor=lecture_meta.instructor,
+            tags=lecture_meta.topic_tags,
         )
 
         # Create Resource in DB
@@ -332,12 +344,18 @@ async def process_youtube_import(
         video_resource = Resource(
             id=video_resource_id,
             type="video",
-            title=clean_topic_title,
-            original_title=entry.get("title") or clean_topic_title,
+            title=final_lecture_title,
+            original_title=entry.get("title") or clean_title,
         )
         video_resource.data = {
             "duration_seconds": duration_sec,
             "file_path": str(mp4_file.relative_to(settings.MEDIA_DIR)),
+            "instructor": lecture_meta.instructor,
+            "institution": lecture_meta.institution,
+            "summary": lecture_meta.summary,
+            "topic_tags": lecture_meta.topic_tags,
+            "slides_url": lecture_meta.slides_url,
+            "resources_url": lecture_meta.resources_url,
             "has_subtitles": has_subtitles,
             "has_embedded_chapters": bool(dl_info.get("chapters")),
         }

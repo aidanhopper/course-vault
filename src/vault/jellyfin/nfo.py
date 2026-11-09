@@ -53,6 +53,7 @@ def write_episode_nfo(
     episode_number: int,
     season_number: int = 1,
     plot: Optional[str] = None,
+    instructor: Optional[str] = None,
     tags: Optional[List[str]] = None,
 ) -> Path:
     """Generate and write an {episode}.nfo file alongside a video for Jellyfin."""
@@ -66,6 +67,10 @@ def write_episode_nfo(
 
     ep_elem = ET.SubElement(root, "episode")
     ep_elem.text = str(episode_number)
+
+    if instructor:
+        director = ET.SubElement(root, "director")
+        director.text = instructor
 
     if plot:
         plot_elem = ET.SubElement(root, "plot")
