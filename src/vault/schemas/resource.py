@@ -55,7 +55,6 @@ ResourceType = Literal["video", "series", "document", "slides", "audio"]
 class ResourceBase(BaseModel):
     title: str
     type: ResourceType
-    original_title: str | None = None
     data: Dict[str, Any] = Field(default_factory=dict)
 
 

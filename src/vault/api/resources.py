@@ -40,7 +40,6 @@ async def list_resources(
             id=r.id,
             type=r.type,
             title=r.title,
-            original_title=r.original_title,
             data=r.data,
             created_at=r.created_at,
             updated_at=r.updated_at,
@@ -57,7 +56,7 @@ async def create_resource(
     resource = Resource(
         type=req.type,
         title=req.title,
-        original_title=req.original_title or req.title,
+        original_title=req.title,
     )
     resource.data = req.data
     session.add(resource)
@@ -68,7 +67,6 @@ async def create_resource(
         id=resource.id,
         type=resource.type,
         title=resource.title,
-        original_title=resource.original_title,
         data=resource.data,
         created_at=resource.created_at,
         updated_at=resource.updated_at,
@@ -95,7 +93,6 @@ async def get_resource(
         id=resource.id,
         type=resource.type,
         title=resource.title,
-        original_title=resource.original_title,
         data=resource.data,
         created_at=resource.created_at,
         updated_at=resource.updated_at,
