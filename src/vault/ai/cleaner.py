@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import re
@@ -27,6 +28,24 @@ class CleanedLectureResult(BaseModel):
     topic_tags: List[str] = Field(default_factory=list)
     slides_url: Optional[str] = None
     resources_url: Optional[str] = None
+
+
+class BatchLectureItem(BaseModel):
+    source_id: str
+    title: str
+    instructor: Optional[str] = None
+    summary: Optional[str] = None
+    topic_tags: List[str] = Field(default_factory=list)
+    slides_url: Optional[str] = None
+    resources_url: Optional[str] = None
+
+
+class BatchCourseResult(BaseModel):
+    series_title: str
+    institution: Optional[str] = None
+    instructors: List[str] = Field(default_factory=list)
+    overview: Optional[str] = None
+    lectures: List[BatchLectureItem] = Field(default_factory=list)
 
 
 async def clean_series_metadata(
@@ -222,32 +241,196 @@ Respond ONLY with valid JSON:
         "temperature": 0.2,
     }
 
+    retries = 3
+    backoff = 2.0
+    for attempt in range(retries):
+        try:
+            url = f"{settings.AI_BASE_URL.rstrip('/')}/chat/completions"
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.post(url, headers=headers, json=payload)
+                if resp.status_code == 429:
+                    if attempt < retries - 1:
+                        wait_time = float(resp.headers.get("retry-after", backoff))
+                        logger.info(f"Gemini rate limit (429) hit; waiting {wait_time:.1f}s before retry...")
+                        await asyncio.sleep(wait_time)
+                        backoff *= 2
+                        continue
+                resp.raise_for_status()
+                data = resp.json()
+                content = data["choices"][0]["message"]["content"]
+                parsed = json.loads(content)
+
+                return CleanedLectureResult(
+                    title=parsed.get("title") or fallback_topic,
+                    instructor=parsed.get("instructor") or fallback_inst,
+                    institution=parsed.get("institution") or series_institution,
+                    summary=parsed.get("summary"),
+                    topic_tags=parsed.get("topic_tags") or [],
+                    slides_url=parsed.get("slides_url") or fallback_slides,
+                    resources_url=parsed.get("resources_url") or fallback_resources,
+                )
+        except Exception as e:
+            if attempt == retries - 1:
+                logger.info(f"Using regex heuristic metadata fallback for '{raw_title}' ({e})")
+                break
+            await asyncio.sleep(backoff)
+            backoff *= 2
+
+    return CleanedLectureResult(
+        title=fallback_topic,
+        instructor=fallback_inst,
+        institution=series_institution,
+        summary=raw_description[:300] if raw_description else None,
+        topic_tags=[],
+        slides_url=fallback_slides,
+        resources_url=fallback_resources,
+    )
+
+
+async def clean_course_batch(
+    raw_series_title: str,
+    uploader: Optional[str] = None,
+    playlist_description: Optional[str] = None,
+    lectures: Optional[List[Dict[str, Any]]] = None,
+) -> BatchCourseResult:
+    """
+    Cleans an entire course playlist in a single batched LLM request.
+    Extracts series title, institution, all professors, overview, and per-lecture metadata.
+    Avoids 429 rate limits by sending 1 request instead of N individual requests.
+    """
+    lectures = lectures or []
+    # 1. Fallback defaults
+    fallback_series_title, fallback_inst = clean_series_title_fallback(raw_series_title)
+    if playlist_description:
+        inst_match = re.search(r"\bInstructors?:\s*([^\n\r]+)", playlist_description, flags=re.IGNORECASE)
+        if inst_match:
+            fallback_inst = inst_match.group(1).strip()
+    fallback_inst = fallback_inst or uploader
+
+    fallback_lectures: List[BatchLectureItem] = []
+    for idx, lec in enumerate(lectures):
+        raw_t = lec.get("title") or f"Lecture {idx + 1}"
+        desc = lec.get("description") or ""
+        clean_t = clean_title_fallback(raw_t, index=idx + 1)
+        clean_top = re.sub(r"^\d+[\.\s\-–—]+\s*", "", clean_t).strip() or clean_t
+        lec_inst = None
+        if desc:
+            im = re.search(r"\bInstructors?:\s*([^\n\r]+)", desc, flags=re.IGNORECASE)
+            if im:
+                lec_inst = im.group(1).strip()
+
+        fallback_lectures.append(
+            BatchLectureItem(
+                source_id=lec.get("source_id") or str(idx + 1),
+                title=clean_top,
+                instructor=lec_inst or fallback_inst,
+                summary=desc[:250] if desc else None,
+            )
+        )
+
+    if not settings.AI_API_KEY:
+        return BatchCourseResult(
+            series_title=fallback_series_title,
+            institution=uploader,
+            instructors=[fallback_inst] if fallback_inst else [],
+            overview=f"Course lectures for {fallback_series_title}.",
+            lectures=fallback_lectures,
+        )
+
+    # 2. Prepare single batch prompt
+    batch_payload = []
+    for idx, lec in enumerate(lectures):
+        batch_payload.append({
+            "source_id": lec.get("source_id") or str(idx + 1),
+            "raw_title": lec.get("title") or f"Lecture {idx + 1}",
+            "description": (lec.get("description") or "")[:400],
+        })
+
+    desc_snippet = (playlist_description[:800] if playlist_description else "None provided")
+    prompt = f"""You are an academic course curator analyzing an entire course playlist at once.
+
+Series Title: {raw_series_title}
+Uploader/Channel: {uploader or 'Unknown'}
+Playlist Description:
+{desc_snippet}
+
+Lectures to analyze:
+{json.dumps(batch_payload, indent=2)}
+
+Analyze the course and all lectures in ONE batch.
+Rules:
+1. 'series_title': Preserves university and course code (e.g. 'MIT 6.7960 Deep Learning' or 'Stanford CS229 Machine Learning'). Strip generic tags like [1080p] or (Fall 2024).
+2. 'institution': University or organization (e.g. 'MIT', 'Stanford', 'Harvard'). If unknown, null.
+3. 'instructors': Array of all professors who lecture in this course (e.g. ['Phillip Isola', 'Sara Beery', 'Jeremy Bernstein']). Look in playlist description and lecture descriptions!
+4. 'overview': 1-2 sentence academic overview of the course.
+5. 'lectures': Array of objects matching each input lecture by 'source_id':
+   - 'source_id': matching source_id
+   - 'title': Clean topic title without lecture numbers or resolution tags (e.g. 'Introduction to Deep Learning')
+   - 'instructor': Specific professor who delivered this lecture (e.g. 'Sara Beery'). Look in the lecture's description! If not found, null.
+   - 'summary': 1-sentence summary of what is taught
+   - 'topic_tags': 2-4 concept tags taught in this lecture
+   - 'slides_url': URL to slides if mentioned in description, else null
+   - 'resources_url': URL to course page or code if mentioned in description, else null
+
+Respond ONLY with valid JSON. Use null for missing fields. Do NOT hallucinate.
+"""
+
+    headers = {
+        "Authorization": f"Bearer {settings.AI_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": settings.AI_MODEL,
+        "messages": [
+            {"role": "system", "content": "You are a helpful educational metadata curator."},
+            {"role": "user", "content": prompt},
+        ],
+        "response_format": {"type": "json_object"},
+        "temperature": 0.2,
+    }
+
     try:
         url = f"{settings.AI_BASE_URL.rstrip('/')}/chat/completions"
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=45.0) as client:
             resp = await client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
             data = resp.json()
             content = data["choices"][0]["message"]["content"]
             parsed = json.loads(content)
 
-            return CleanedLectureResult(
-                title=parsed.get("title") or fallback_topic,
-                instructor=parsed.get("instructor") or fallback_inst,
-                institution=parsed.get("institution") or series_institution,
-                summary=parsed.get("summary"),
-                topic_tags=parsed.get("topic_tags") or [],
-                slides_url=parsed.get("slides_url") or fallback_slides,
-                resources_url=parsed.get("resources_url") or fallback_resources,
+            output_lectures: List[BatchLectureItem] = []
+            parsed_lectures = parsed.get("lectures", [])
+
+            lookup = {item.get("source_id"): item for item in parsed_lectures if isinstance(item, dict)}
+
+            for idx, lec in enumerate(lectures):
+                sid = lec.get("source_id") or str(idx + 1)
+                item = lookup.get(sid) or {}
+                output_lectures.append(
+                    BatchLectureItem(
+                        source_id=sid,
+                        title=item.get("title") or fallback_lectures[idx].title,
+                        instructor=item.get("instructor") or fallback_lectures[idx].instructor,
+                        summary=item.get("summary") or fallback_lectures[idx].summary,
+                        topic_tags=item.get("topic_tags") or [],
+                        slides_url=item.get("slides_url"),
+                        resources_url=item.get("resources_url"),
+                    )
+                )
+
+            return BatchCourseResult(
+                series_title=parsed.get("series_title") or fallback_series_title,
+                institution=parsed.get("institution") or uploader,
+                instructors=parsed.get("instructors") or ([fallback_inst] if fallback_inst else []),
+                overview=parsed.get("overview") or f"Course lectures for {fallback_series_title}.",
+                lectures=output_lectures,
             )
     except Exception as e:
-        logger.warning(f"Lecture metadata extraction failed ({e}); using regex heuristic fallback")
-        return CleanedLectureResult(
-            title=fallback_topic,
-            instructor=fallback_inst,
-            institution=series_institution,
-            summary=raw_description[:300] if raw_description else None,
-            topic_tags=[],
-            slides_url=fallback_slides,
-            resources_url=fallback_resources,
+        logger.warning(f"Batch metadata cleanup failed ({e}); using heuristic fallback")
+        return BatchCourseResult(
+            series_title=fallback_series_title,
+            institution=uploader,
+            instructors=[fallback_inst] if fallback_inst else [],
+            overview=f"Course lectures for {fallback_series_title}.",
+            lectures=fallback_lectures,
         )

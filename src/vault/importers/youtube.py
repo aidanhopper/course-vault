@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, List, Optional
 import yt_dlp
 from sqlmodel import select
 
-from vault.ai.cleaner import clean_lecture_metadata, clean_series_metadata
+from vault.ai.cleaner import clean_course_batch, clean_lecture_metadata, clean_series_metadata
 from vault.ai.fallback import clean_title_fallback, sanitize_filename
 from vault.config import settings
 from vault.db.models import Job, Resource, SeriesItem, SourceMetadata, Topic, TranscriptCue, generate_id
@@ -200,7 +200,35 @@ async def process_youtube_import(
         institution=cleaned_meta.institution,
     )
 
-    # 4. Download and process each video sequentially
+    # 4. Gather available descriptions and run a single batched metadata call
+    lectures_batch_input = []
+    async with async_session_maker() as session:
+        for idx, entry in enumerate(entries):
+            vid = entry.get("id")
+            desc = entry.get("description") or ""
+            if not desc and vid:
+                stmt_s = select(SourceMetadata).where(SourceMetadata.source_id == vid)
+                sm = (await session.exec(stmt_s)).first()
+                if sm:
+                    desc = sm.raw_payload.get("description") or ""
+            lectures_batch_input.append({
+                "source_id": vid or str(idx + 1),
+                "title": entry.get("title") or f"Lecture {idx + 1}",
+                "description": desc,
+            })
+
+    batch_lookup = {}
+    if any(bool(l["description"]) for l in lectures_batch_input):
+        logger.info(f"Running batched AI metadata cleanup for {len(lectures_batch_input)} lectures...")
+        batch_res = await clean_course_batch(
+            raw_series_title=title_override or raw_series_title,
+            uploader=uploader,
+            playlist_description=raw_info.get("description"),
+            lectures=lectures_batch_input,
+        )
+        batch_lookup = {l.source_id: l for l in batch_res.lectures}
+
+    # 5. Download and process each video sequentially
     total_videos = len(entries)
     for idx, entry in enumerate(entries):
         if is_cancelled_func and is_cancelled_func():
@@ -251,27 +279,41 @@ async def process_youtube_import(
             # Re-use existing video file, but refresh and ensure metadata and NFO are up-to-date
             async with async_session_maker() as session:
                 existing_res = await session.get(Resource, existing_res_id)
-                stmt_src = select(SourceMetadata).where(SourceMetadata.resource_id == existing_res_id)
-                src_meta_rec = (await session.exec(stmt_src)).first()
+                b_meta = batch_lookup.get(video_id)
 
-                raw_desc = (src_meta_rec.raw_payload.get("description") if src_meta_rec else "") or ""
-                lecture_meta = await clean_lecture_metadata(
-                    raw_title=clean_title,
-                    raw_description=raw_desc,
-                    channel=uploader,
-                    series_institution=cleaned_meta.institution,
-                )
+                if b_meta:
+                    final_title = b_meta.title or clean_topic_title
+                    inst = b_meta.instructor
+                    summ = b_meta.summary
+                    tags = b_meta.topic_tags
+                    slides = b_meta.slides_url
+                    res_url = b_meta.resources_url
+                else:
+                    stmt_src = select(SourceMetadata).where(SourceMetadata.resource_id == existing_res_id)
+                    src_meta_rec = (await session.exec(stmt_src)).first()
+                    raw_desc = (src_meta_rec.raw_payload.get("description") if src_meta_rec else "") or ""
+                    lecture_meta = await clean_lecture_metadata(
+                        raw_title=clean_title,
+                        raw_description=raw_desc,
+                        channel=uploader,
+                        series_institution=cleaned_meta.institution,
+                    )
+                    final_title = lecture_meta.title or clean_topic_title
+                    inst = lecture_meta.instructor
+                    summ = lecture_meta.summary
+                    tags = lecture_meta.topic_tags
+                    slides = lecture_meta.slides_url
+                    res_url = lecture_meta.resources_url
 
                 if existing_res:
-                    final_title = lecture_meta.title or clean_topic_title
                     existing_res.title = final_title
                     data = existing_res.data
-                    data["instructor"] = lecture_meta.instructor
-                    data["institution"] = lecture_meta.institution
-                    data["summary"] = lecture_meta.summary
-                    data["topic_tags"] = lecture_meta.topic_tags
-                    data["slides_url"] = lecture_meta.slides_url
-                    data["resources_url"] = lecture_meta.resources_url
+                    data["instructor"] = inst
+                    data["institution"] = cleaned_meta.institution
+                    data["summary"] = summ
+                    data["topic_tags"] = tags
+                    data["slides_url"] = slides
+                    data["resources_url"] = res_url
                     existing_res.data = data
                     session.add(existing_res)
 
@@ -283,9 +325,9 @@ async def process_youtube_import(
                             nfo_path=nfo_p,
                             title=final_title,
                             episode_number=idx + 1,
-                            plot=lecture_meta.summary or (raw_desc[:1000] if raw_desc else final_title),
-                            instructor=lecture_meta.instructor,
-                            tags=lecture_meta.topic_tags,
+                            plot=summ or final_title,
+                            instructor=inst,
+                            tags=tags,
                         )
 
                 # Ensure linked to this series
