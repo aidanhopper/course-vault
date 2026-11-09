@@ -31,8 +31,12 @@ class Settings(BaseSettings):
     JELLYFIN_API_KEY: str | None = None
 
     @property
+    def videos_dir(self) -> Path:
+        return self.MEDIA_DIR / "Videos"
+
+    @property
     def lectures_dir(self) -> Path:
-        return self.MEDIA_DIR / "Lectures"
+        return self.videos_dir
 
     @property
     def documents_dir(self) -> Path:

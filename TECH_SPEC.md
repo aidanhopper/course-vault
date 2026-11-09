@@ -47,7 +47,7 @@ The **Course Resource Vault** is a single-process, async-first Python applicatio
                                        ▼
                     ┌─────────────────────────────────────┐
                     │          Filesystem / Media         │
-                    │   Lectures/ {Series} / {Video}.mp4  │
+                    │   Videos/ {Series} / {Video}.mp4    │
                     │   Jellyfin watches this directory   │
                     └─────────────────────────────────────┘
 ```
@@ -308,7 +308,7 @@ download_opts = {
 Files are written directly into the configured `MEDIA_DIR`:
 ```text
 {MEDIA_DIR}/
-  Lectures/
+  Videos/
     {Series Title}/
       tvshow.nfo
       poster.jpg

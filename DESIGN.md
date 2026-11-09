@@ -82,7 +82,7 @@ Every resource shares a standard envelope:
 ```json
 {
   "duration_seconds": 3012,
-  "file_path": "Lectures/MIT 6.006/MIT 6.006 - E01 - Peak Finding.mp4",
+  "file_path": "Videos/MIT 6.006/MIT 6.006 - E01 - Peak Finding.mp4",
   "jellyfin_item_id": "a1b2c3...",
   "has_subtitles": true,
   "has_embedded_chapters": true
@@ -168,7 +168,7 @@ The Vault uses a unified URL importer. The caller submits a URL, and the interna
 - **Media Download:** Pulls best-quality MP4, burns in chapter markers (`--embed-chapters`), extracts WebVTT captions (`.en.vtt`), and grabs thumbnails (`-thumb.jpg` and `poster.jpg`).
 - **Jellyfin TV-Show Structure (Flat by default):**
   ```
-  Lectures/
+  Videos/
     MIT 6.006 Introduction to Algorithms/
       poster.jpg
       tvshow.nfo

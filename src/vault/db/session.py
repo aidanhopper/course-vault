@@ -10,7 +10,7 @@ from vault.config import settings
 # Ensure data and media directories exist
 settings.VAULT_DATA_DIR.mkdir(parents=True, exist_ok=True)
 settings.MEDIA_DIR.mkdir(parents=True, exist_ok=True)
-settings.lectures_dir.mkdir(parents=True, exist_ok=True)
+settings.videos_dir.mkdir(parents=True, exist_ok=True)
 settings.documents_dir.mkdir(parents=True, exist_ok=True)
 settings.slides_dir.mkdir(parents=True, exist_ok=True)
 settings.audio_dir.mkdir(parents=True, exist_ok=True)

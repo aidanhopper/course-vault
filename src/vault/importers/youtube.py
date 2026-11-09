@@ -156,7 +156,7 @@ async def process_youtube_import(
 
     final_series_title = title_override or cleaned_meta.series_title
     clean_folder_name = sanitize_filename(final_series_title)
-    series_dir = settings.lectures_dir / clean_folder_name
+    series_dir = settings.videos_dir / clean_folder_name
     series_dir.mkdir(parents=True, exist_ok=True)
 
     # 3. Create or resolve Series Resource
@@ -216,13 +216,16 @@ async def process_youtube_import(
             if idx < len(cleaned_meta.video_titles)
             else clean_title_fallback(entry.get("title") or f"Lecture {idx + 1}", index=idx + 1)
         )
-        safe_video_name = sanitize_filename(clean_title)
+        # Strip redundant leading numbering (e.g. '01. Intro' -> 'Intro') for the episode title
+        import re
+        clean_topic_title = re.sub(r"^\d+[\.\s\-–—]+\s*", "", clean_title).strip() or clean_title
+        safe_video_name = sanitize_filename(clean_topic_title)
 
         # Update job progress
         async with async_session_maker() as session:
             job = await session.get(Job, job_id)
             if job:
-                job.current_item = clean_title
+                job.current_item = clean_topic_title
                 job.progress_percent = 15.0 + (idx / total_videos) * 80.0
                 await session.commit()
 
@@ -244,7 +247,6 @@ async def process_youtube_import(
         if existing_res_id:
             # Re-use existing resource
             async with async_session_maker() as session:
-                # Add series item join if not already present
                 stmt_item = select(SeriesItem).where(
                     SeriesItem.parent_series_id == series_resource.id,
                     SeriesItem.child_resource_id == existing_res_id,
@@ -263,7 +265,7 @@ async def process_youtube_import(
                     await session.commit()
             continue
 
-        # Target file stem for Jellyfin naming: {Series Title} - E{XX} - {Clean Title}
+        # Target file stem for Jellyfin naming: {Series Title} - E{XX} - {Clean Topic}
         episode_stem = series_dir / f"{clean_folder_name} - E{idx + 1:02d} - {safe_video_name}"
 
         # Download with yt-dlp in worker thread
@@ -292,13 +294,24 @@ async def process_youtube_import(
                 logger.warning(f"No media file found after download for {episode_stem}")
                 continue
 
-        # Check for subtitles (.vtt)
+        # Check for subtitles and clean up variant duplicates (.en-orig.vtt, etc.)
+        for extra_vtt in glob.glob(f"{glob.escape(str(episode_stem))}*.en-*.vtt"):
+            try:
+                os.unlink(extra_vtt)
+            except Exception:
+                pass
+
         has_subtitles = False
-        vtt_matches = glob.glob(f"{glob.escape(str(episode_stem))}*.vtt")
         vtt_file: Optional[Path] = None
-        if vtt_matches:
-            vtt_file = Path(vtt_matches[0])
+        primary_vtt = Path(f"{episode_stem}.en.vtt")
+        if primary_vtt.is_file():
+            vtt_file = primary_vtt
             has_subtitles = True
+        else:
+            vtt_matches = glob.glob(f"{glob.escape(str(episode_stem))}*.vtt")
+            if vtt_matches:
+                vtt_file = Path(vtt_matches[0])
+                has_subtitles = True
 
         duration_sec = dl_info.get("duration") or entry.get("duration")
         raw_description = dl_info.get("description") or ""
@@ -307,9 +320,9 @@ async def process_youtube_import(
         nfo_path = Path(f"{episode_stem}.nfo")
         write_episode_nfo(
             nfo_path=nfo_path,
-            title=clean_title,
+            title=clean_topic_title,
             episode_number=idx + 1,
-            plot=raw_description[:1000] if raw_description else clean_title,
+            plot=raw_description[:1000] if raw_description else clean_topic_title,
         )
 
         # Create Resource in DB
@@ -317,8 +330,8 @@ async def process_youtube_import(
         video_resource = Resource(
             id=video_resource_id,
             type="video",
-            title=clean_title,
-            original_title=entry.get("title") or clean_title,
+            title=clean_topic_title,
+            original_title=entry.get("title") or clean_topic_title,
         )
         video_resource.data = {
             "duration_seconds": duration_sec,
