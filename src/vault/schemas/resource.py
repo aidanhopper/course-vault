@@ -70,12 +70,15 @@ class ResourceCreate(ResourceBase):
     pass
 
 
-class ResourceRead(ResourceBase):
+class ResourceRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    type: ResourceType
+    title: str
     created_at: datetime
     updated_at: datetime
+    data: Dict[str, Any] = Field(default_factory=dict)
 
     # Optional aspects hydrated when requested via ?include=...
     topics: List[TopicRead] | None = None
