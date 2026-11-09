@@ -143,13 +143,13 @@ The Vault uses a unified URL importer. The caller submits a URL, and the interna
                                      │
        ┌─────────────────────────────┼─────────────────────────────┐
        ▼                             ▼                             ▼
-[ YouTube Importer ]         [ Document Importer ]        [ Audio Importer ]
- - Playlist OR Single Video   - Download PDF (httpx)       - Download audio (yt-dlp/direct)
- - yt-dlp flat metadata       - Extract outline/TOC        - Extract topics / chapters
- - AI title & topic cleanup   - Detect slides vs book      - Save to vault /audio
- - Download MP4 + VTT         - Save to vault /documents   - Register type: "audio"
- - Embed chapters & NFO       - Save to vault /documents   - Register type: "document"
- - Register type: "video"
+[ YouTube Importer ]         [ Course Page Importer ]     [ PDF / Media Importer ]
+ - Playlist OR Single Video   - MIT OCW / Course sites     - Direct PDF download
+ - yt-dlp flat metadata       - Lecture slide PDFs         - Slide count & outline
+ - Batch AI metadata cleanup  - Homework sets & solutions  - Byte-range streaming
+ - Download MP4 + VTT         - Syllabus & prerequisites   - Register as document/slides
+ - Embed chapters & NFO       - Pairs slides to videos
+ - Register type: "video"     - Register type: "document"
 ```
 
 ### 1. YouTube Importer (Playlists & Single Videos)
@@ -163,8 +163,7 @@ The Vault uses a unified URL importer. The caller submits a URL, and the interna
   - A study client can treat each `Topic` as a discrete modular lesson, while Jellyfin renders them as chapters on the scrubber bar.
 - **Adding to an Existing Series:**
   - If a single video URL is imported with an existing `series_id`, it is downloaded once, cataloged as a `type: "video"` resource, and appended to that series sequence.
-- **Metadata extraction:** Runs `yt-dlp` in flat-dump mode for fast introspection.
-- **AI Cleanup:** Passes raw titles to an internal LLM to strip clickbait, numbers, and tags (`[1080p]`, `Fall 2023`) while keeping actual lecture topics intact. Falls back cleanly to regex heuristics if no AI key is configured.
+- **Batch AI Cleanup:** Passes all raw titles and descriptions in a single batched LLM request to avoid 429 rate limits, generating clean titles, exact professors, summaries, and concept tags.
 - **Media Download:** Pulls best-quality MP4, burns in chapter markers (`--embed-chapters`), extracts WebVTT captions (`.en.vtt`), and grabs thumbnails (`-thumb.jpg` and `poster.jpg`).
 - **Jellyfin TV-Show Structure (Flat by default):**
   ```
@@ -179,7 +178,14 @@ The Vault uses a unified URL importer. The caller submits a URL, and the interna
   ```
 - **Deduplication:** SQLite stores YouTube video IDs to skip existing files upon re-import or interrupted runs.
 
-### 2. Document & Slides Importer (PDF)
+### 2. Course Page Importer (MIT OpenCourseWare)
+- Accepts official course homepages (e.g. `https://ocw.mit.edu/courses/6-7960-deep-learning-fall-2024/`).
+- Discovers and downloads all lecture slide PDFs, saving to `media/Slides/{Series Title}/`.
+- Automatically pairs each slide deck 1:1 with its corresponding video lecture in SQLite (`video.data["slides_resource_id"]`).
+- Discovers and downloads all homework problem sets and official solution PDFs into `media/Documents/{Series Title}/`.
+- Extracts syllabus description and prerequisites into the course series manifest (`series.data["prerequisites"]`).
+
+### 3. Document & Slides Importer (PDF)
 - Downloads the PDF document.
 - Uses `pypdf` to parse page count and outline (Table of Contents).
 - Converts the outline entries into `Topic` records with `start_page` and `end_page`.

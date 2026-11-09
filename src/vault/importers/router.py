@@ -3,6 +3,7 @@ from typing import Callable, Optional
 from vault.db.models import Job
 from vault.db.session import async_session_maker
 from vault.importers.document import import_pdf_document
+from vault.importers.ocw import is_ocw_url, process_ocw_import
 from vault.importers.youtube import is_youtube_url, process_youtube_import
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,15 @@ async def run_import_job(
     logger.info(f"Starting import job {job_id} for URL: {url}")
 
     try:
-        if is_youtube_url(url):
+        if is_ocw_url(url):
+            await process_ocw_import(
+                job_id=job_id,
+                url=url,
+                series_id=series_id,
+                title_override=title_override,
+                is_cancelled_func=is_cancelled_func,
+            )
+        elif is_youtube_url(url):
             await process_youtube_import(
                 job_id=job_id,
                 url=url,
