@@ -102,7 +102,7 @@ class Job(SQLModel, table=True):
     __tablename__ = "jobs"
 
     id: str = Field(default_factory=lambda: generate_id("job"), primary_key=True)
-    series_id: str | None = Field(default=None, index=True)
+    resource_id: str | None = Field(default=None, index=True, sa_column_kwargs={"name": "series_id"})
     status: str = Field(default="queued", index=True)  # queued, extracting, cleaning, downloading, completed, failed, cancelled
     progress_percent: float = Field(default=0.0)
     total_items: int = Field(default=0)
@@ -111,3 +111,11 @@ class Job(SQLModel, table=True):
     error_message: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+
+    @property
+    def series_id(self) -> str | None:
+        return self.resource_id
+
+    @series_id.setter
+    def series_id(self, value: str | None) -> None:
+        self.resource_id = value

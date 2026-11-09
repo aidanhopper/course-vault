@@ -18,7 +18,7 @@ def is_pdf_url(url: str) -> bool:
 async def run_import_job(
     job_id: str,
     url: str,
-    series_id: Optional[str] = None,
+    resource_id: Optional[str] = None,
     title_override: Optional[str] = None,
     is_cancelled_func: Optional[Callable[[], bool]] = None,
 ) -> None:
@@ -30,7 +30,7 @@ async def run_import_job(
             await process_ocw_import(
                 job_id=job_id,
                 url=url,
-                series_id=series_id,
+                series_id=resource_id,
                 title_override=title_override,
                 is_cancelled_func=is_cancelled_func,
             )
@@ -38,7 +38,7 @@ async def run_import_job(
             await process_youtube_import(
                 job_id=job_id,
                 url=url,
-                target_series_id=series_id,
+                target_series_id=resource_id,
                 title_override=title_override,
                 is_cancelled_func=is_cancelled_func,
             )
@@ -54,12 +54,13 @@ async def run_import_job(
             resource = await import_pdf_document(
                 url=url,
                 title_override=title_override,
-                series_id=series_id,
+                series_id=resource_id,
             )
 
             async with async_session_maker() as session:
                 job = await session.get(Job, job_id)
                 if job:
+                    job.resource_id = resource.id
                     job.status = "completed"
                     job.progress_percent = 100.0
                     job.completed_items = 1
@@ -69,7 +70,7 @@ async def run_import_job(
             await process_youtube_import(
                 job_id=job_id,
                 url=url,
-                target_series_id=series_id,
+                target_series_id=resource_id,
                 title_override=title_override,
                 is_cancelled_func=is_cancelled_func,
             )

@@ -25,8 +25,9 @@ async def create_import(
     if not request.url.strip():
         raise HTTPException(status_code=400, detail="URL cannot be empty")
 
+    target_id = request.target_resource_id
     job = Job(
-        series_id=request.series_id,
+        resource_id=target_id,
         status="queued",
     )
     session.add(job)
@@ -37,13 +38,13 @@ async def create_import(
     await job_queue.enqueue(
         job_id=job.id,
         url=request.url,
-        series_id=request.series_id,
+        resource_id=target_id,
         title_override=request.title_override,
     )
 
     return ImportResponse(
         job_id=job.id,
-        series_id=job.series_id,
+        resource_id=job.resource_id,
         status=job.status,
     )
 

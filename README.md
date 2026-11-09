@@ -56,15 +56,16 @@ uv run pytest
 ## API Overview
 
 ### Ingestion
-- `POST /api/v1/imports` — Submit YouTube URL or PDF URL for background import:
+- `POST /api/v1/imports` — Submit YouTube URL, OCW course URL, or PDF URL for background import:
   ```json
   {
     "url": "https://www.youtube.com/playlist?list=PLB2BE3D6041052A62",
-    "series_id": null,
+    "resource_id": null,
     "title_override": null
   }
   ```
-  Returns `202 Accepted` with `job_id`.
+  Returns `202 Accepted` with `job_id` and `resource_id`.
+- `GET /api/v1/jobs` — List all import jobs (filter with `?status=downloading|completed`).
 - `GET /api/v1/jobs/{job_id}` — Check status, progress %, and current item.
 - `POST /api/v1/jobs/{job_id}/cancel` — Cancel active import job.
 

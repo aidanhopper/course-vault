@@ -202,7 +202,7 @@ The database is built on **SQLite** with **aiosqlite / SQLModel**:
 - **`topics`**: `id`, `resource_id`, `title`, `start_seconds`, `end_seconds`, `start_page`, `end_page`, `order_index`
 - **`transcript_cues`**: `id`, `resource_id`, `start_seconds`, `end_seconds`, `text` (ready for playback sync and future SQLite FTS5 search)
 - **`source_metadata`**: `id`, `resource_id`, `provider` (`"youtube"`), `payload` (raw JSON)
-- **`jobs`**: `id`, `series_id`, `status` (`queued`, `extracting`, `cleaning`, `downloading`, `completed`, `failed`), `progress_percent`, `current_item`, `error_message`, `created_at`, `updated_at`
+- **`jobs`**: `id`, `resource_id`, `status` (`queued`, `extracting`, `cleaning`, `downloading`, `completed`, `failed`), `progress_percent`, `current_item`, `error_message`, `created_at`, `updated_at`
 
 ---
 
@@ -210,10 +210,14 @@ The database is built on **SQLite** with **aiosqlite / SQLModel**:
 
 ### Imports & Jobs
 - `POST /api/v1/imports`
-  - Request: `{"url": "https://...", "series_id": null, "title_override": null}`
-  - Response: `202 Accepted` with `{"job_id": "job_...", "series_id": "res_...", "status": "queued"}`
+  - Request: `{"url": "https://...", "resource_id": null, "title_override": null}`
+  - Response: `202 Accepted` with `{"job_id": "job_...", "resource_id": "res_...", "status": "queued"}`
+- `GET /api/v1/jobs`
+  - List all import jobs (supports `?status=downloading|completed|failed`).
 - `GET /api/v1/jobs/{job_id}`
   - Returns current job status, progress %, and active step details.
+- `POST /api/v1/jobs/{job_id}/cancel`
+  - Abort active import job.
 
 ### Resources (Universal Endpoints)
 - `GET /api/v1/resources`
