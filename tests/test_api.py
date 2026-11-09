@@ -164,6 +164,12 @@ async def test_import_and_job_endpoints():
         assert job_data["id"] == job_id
         assert job_data["status"] in ("queued", "extracting", "cleaning", "downloading", "failed")
 
+        # List all jobs
+        all_jobs_resp = await client.get("/api/v1/jobs")
+        assert all_jobs_resp.status_code == 200
+        jobs_list = all_jobs_resp.json()
+        assert any(j["id"] == job_id for j in jobs_list)
+
         # Cancel job
         cancel_resp = await client.post(f"/api/v1/jobs/{job_id}/cancel")
         assert cancel_resp.status_code == 200

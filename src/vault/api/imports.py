@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -45,6 +46,26 @@ async def create_import(
         series_id=job.series_id,
         status=job.status,
     )
+
+
+@router.get(
+    "/jobs",
+    response_model=List[JobRead],
+    summary="List all import jobs",
+    description="Lists all import jobs, ordered by newest first.",
+)
+async def list_jobs(
+    status: Optional[str] = Query(None, description="Filter by status (queued, downloading, completed, failed, cancelled)"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    session: AsyncSession = Depends(get_session),
+) -> List[JobRead]:
+    stmt = select(Job)
+    if status:
+        stmt = stmt.where(Job.status == status)
+    stmt = stmt.order_by(Job.created_at.desc()).offset(offset).limit(limit)
+    jobs = (await session.exec(stmt)).all()
+    return [JobRead.model_validate(j) for j in jobs]
 
 
 @router.get(
