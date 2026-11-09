@@ -8,6 +8,7 @@ def write_tvshow_nfo(
     title: str,
     overview: Optional[str] = None,
     instructor: Optional[str] = None,
+    institution: Optional[str] = None,
     tags: Optional[List[str]] = None,
 ) -> Path:
     """Generate and write a tvshow.nfo file for Jellyfin/Kodi inside series_dir."""
@@ -22,16 +23,22 @@ def write_tvshow_nfo(
     if instructor:
         director = ET.SubElement(root, "director")
         director.text = instructor
+
+    studio_name = institution or instructor
+    if studio_name:
         studio = ET.SubElement(root, "studio")
-        studio.text = instructor
+        studio.text = studio_name
 
     genre = ET.SubElement(root, "genre")
     genre.text = "Education"
 
-    if tags:
-        for t in tags:
-            tag_elem = ET.SubElement(root, "tag")
-            tag_elem.text = t
+    all_tags = list(tags or [])
+    if institution and institution not in all_tags:
+        all_tags.append(institution)
+
+    for t in all_tags:
+        tag_elem = ET.SubElement(root, "tag")
+        tag_elem.text = t
 
     tree = ET.ElementTree(root)
     nfo_path = series_dir / "tvshow.nfo"

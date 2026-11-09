@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 class CleanedSeriesResult(BaseModel):
     series_title: str
+    institution: Optional[str] = None
     instructor: Optional[str] = None
     overview: Optional[str] = None
     video_titles: List[str]
@@ -44,29 +45,29 @@ async def clean_series_metadata(
         )
 
     # 2. LLM Call
-    prompt = f"""You are a course metadata cleaner for an educational archive.
-Clean and normalize the following course playlist and its lecture titles:
+    prompt = f"""You are a course metadata curator for an educational video archive.
+Clean and normalize the following course playlist:
 
 Raw Course/Series Title: {raw_series_title}
-Instructor Hint: {instructor_hint or 'Unknown'}
+Instructor/Channel Hint: {instructor_hint or 'Unknown'}
 
 Raw Lecture Titles:
 {json.dumps(raw_video_titles, indent=2)}
 
 Rules:
-1. 'series_title': Clean, academic title (e.g. 'Introduction to Algorithms'). Strip YouTube tags, year codes, or channel watermarks.
-2. 'instructor': Instructor or university name if discernable, else null.
-3. 'overview': Concise 1-2 sentence description of the course topic.
-4. 'video_titles': Array of cleaned lecture titles matching the exact same length and order as the input array.
-   Format each video title as: '01. Topic Name', '02. Next Topic', etc.
-   Preserve the lecture topic. Strip boilerplate like 'Lecture 1 MIT 6.006 Fall 2011 [1080p]'.
+1. 'series_title': Clean, academic title that MUST PRESERVE the university or institution prefix and course code (e.g. 'MIT 6.7960 Deep Learning' or 'Stanford CS229 Machine Learning'). It is vital to preserve the institution and course code so courses from different universities are easily differentiated! Strip resolution tags, semester codes (like 'Fall 2024'), or generic playlist fluff.
+2. 'institution': The university or organization that produced the course (e.g. 'MIT', 'Stanford', 'Harvard', 'freeCodeCamp'). If unknown, null.
+3. 'instructor': Professor or instructor names if mentioned or discernible, else null.
+4. 'overview': Concise 1-2 sentence description of what the course covers.
+5. 'video_titles': Clean topic titles only, matching the exact order of the input array. Strip lecture numbers, resolution tags, and redundant prefixes (e.g. 'Introduction to Deep Learning', 'How to Train a Neural Net').
 
 Respond ONLY with valid JSON in this structure:
 {{
   "series_title": "...",
+  "institution": "...",
   "instructor": "...",
   "overview": "...",
-  "video_titles": ["01. ...", "02. ..."]
+  "video_titles": ["..."]
 }}
 """
 
@@ -101,6 +102,7 @@ Respond ONLY with valid JSON in this structure:
 
             return CleanedSeriesResult(
                 series_title=parsed.get("series_title") or fallback_series_title,
+                institution=parsed.get("institution"),
                 instructor=parsed.get("instructor") or fallback_inst,
                 overview=parsed.get("overview") or f"Course lectures for {fallback_series_title}.",
                 video_titles=video_titles,

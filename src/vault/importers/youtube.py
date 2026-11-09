@@ -172,6 +172,7 @@ async def process_youtube_import(
                 original_title=raw_series_title,
             )
             series_resource.data = {
+                "institution": cleaned_meta.institution,
                 "instructor": cleaned_meta.instructor,
                 "overview": cleaned_meta.overview,
                 "folder_path": str(series_dir.relative_to(settings.MEDIA_DIR)),
@@ -195,6 +196,7 @@ async def process_youtube_import(
         title=final_series_title,
         overview=cleaned_meta.overview,
         instructor=cleaned_meta.instructor,
+        institution=cleaned_meta.institution,
     )
 
     # 4. Download and process each video sequentially
