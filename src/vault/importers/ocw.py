@@ -1,7 +1,9 @@
 import asyncio
+import glob
 import html
 import io
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -9,12 +11,18 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from pypdf import PdfReader
 from sqlmodel import select
+import yt_dlp
 
+from vault.ai.cleaner import clean_course_batch, clean_lecture_metadata
 from vault.ai.fallback import clean_series_title_fallback, sanitize_filename
 from vault.config import settings
-from vault.db.models import Collection, CollectionItem, Job, Resource, SeriesItem, SourceMetadata, Topic, generate_id
+from vault.db.models import Collection, CollectionItem, Job, Resource, SeriesItem, SourceMetadata, Topic, TranscriptCue, generate_id
 from vault.db.session import async_session_maker
 from vault.importers.document import extract_pdf_topics
+from vault.importers.youtube import download_single_youtube_video
+from vault.jellyfin.client import trigger_jellyfin_refresh
+from vault.jellyfin.nfo import write_episode_nfo, write_tvshow_nfo
+from vault.schemas.transcript import parse_vtt_content
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +159,66 @@ async def fetch_ocw_syllabus(course_url: str, client: httpx.AsyncClient) -> Dict
     }
 
 
+async def fetch_ocw_videos(course_url: str, client: httpx.AsyncClient) -> List[Dict[str, Any]]:
+    """Crawls /video_galleries/lecture-videos/ and discovers all lecture video pages and their YouTube IDs."""
+    gallery_url = urljoin(course_url, "video_galleries/lecture-videos/")
+    try:
+        resp = await client.get(gallery_url)
+        if resp.status_code != 200:
+            return []
+    except Exception as e:
+        logger.warning(f"Could not fetch OCW video gallery page: {e}")
+        return []
+
+    # Find all links to resource mp4 subpages
+    links = re.findall(r'<a[^>]+href=[\"\'](/courses/[^\"\']+_mp4/)[\"\'][^>]*>(.*?)</a>', resp.text, re.DOTALL)
+    if not links:
+        return []
+
+    # Deduplicate links while preserving order
+    seen_hrefs = set()
+    unique_links = []
+    for href, label in links:
+        if href not in seen_hrefs:
+            seen_hrefs.add(href)
+            unique_links.append((href, label))
+
+    async def fetch_video_details(href: str, label: str) -> Optional[Dict[str, Any]]:
+        clean_label = html.unescape(" ".join(re.sub(r'<[^>]+>', ' ', label).split()))
+        lec_m = re.search(r"\b(?:lec|lecture)\.?\s*0*(\d+)", clean_label, flags=re.IGNORECASE)
+        idx = int(lec_m.group(1)) if lec_m else 0
+        clean_title = re.sub(r"^(?:lec(?:ture)?\.?\s*0*\d+[\s:\-–—]+)", "", clean_label, flags=re.IGNORECASE).strip() or clean_label
+
+        page_url = urljoin(course_url, href)
+        try:
+            p_resp = await client.get(page_url)
+            if p_resp.status_code != 200:
+                return None
+            m = re.search(r'video-player-([a-zA-Z0-9_-]{11})-', p_resp.text)
+            yt_id = m.group(1) if m else None
+            if not yt_id:
+                m_alt = re.search(r'(?:youtube\.com/(?:watch\?v=|embed/)|youtu\.be/)([a-zA-Z0-9_-]{11})', p_resp.text)
+                yt_id = m_alt.group(1) if m_alt else None
+
+            if yt_id:
+                return {
+                    "index": idx,
+                    "title": clean_title,
+                    "youtube_id": yt_id,
+                    "video_url": f"https://www.youtube.com/watch?v={yt_id}",
+                    "ocw_page_url": page_url,
+                }
+        except Exception as e:
+            logger.warning(f"Error resolving OCW video page {page_url}: {e}")
+        return None
+
+    tasks = [fetch_video_details(href, label) for href, label in unique_links]
+    results = await asyncio.gather(*tasks)
+    videos = [r for r in results if r is not None]
+    videos.sort(key=lambda x: x["index"])
+    return videos
+
+
 async def process_ocw_import(
     job_id: str,
     url: str,
@@ -170,12 +238,13 @@ async def process_ocw_import(
             await session.commit()
 
     async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-        # 1. Discover all lecture slides and homework files
+        # 1. Discover all lecture videos, slides, and homework files
+        lecture_videos = await fetch_ocw_videos(course_url, client)
         lecture_notes = await fetch_ocw_lecture_notes(course_url, client)
         homework_items = await fetch_ocw_homework(course_url, client)
         syllabus_info = await fetch_ocw_syllabus(course_url, client)
 
-    total_files = len(lecture_notes) + len(homework_items)
+    total_files = len(lecture_videos) + len(lecture_notes) + len(homework_items)
     if total_files == 0:
         async with async_session_maker() as session:
             job = await session.get(Job, job_id)
@@ -235,18 +304,206 @@ async def process_ocw_import(
             await session.commit()
 
     # Create target directories
+    videos_course_dir = settings.videos_dir / course_folder_name
+    videos_course_dir.mkdir(parents=True, exist_ok=True)
+
     slides_course_dir = settings.slides_dir / course_folder_name
     slides_course_dir.mkdir(parents=True, exist_ok=True)
 
     docs_course_dir = settings.documents_dir / course_folder_name
     docs_course_dir.mkdir(parents=True, exist_ok=True)
 
+    if lecture_videos:
+        write_tvshow_nfo(
+            series_dir=videos_course_dir,
+            title=course_col.title,
+            overview=syllabus_info.get("syllabus_snippet"),
+            institution="MIT",
+        )
+
+    downloaded_videos: List[Dict[str, Any]] = []
     downloaded_slides: List[Dict[str, Any]] = []
     downloaded_homework: List[Dict[str, Any]] = []
     completed_count = 0
 
+    # 3. Download and process Lecture Videos
+    for vid_entry in lecture_videos:
+        if is_cancelled_func and is_cancelled_func():
+            return
+
+        lec_idx = vid_entry["index"]
+        clean_title = vid_entry["title"]
+        video_url = vid_entry["video_url"]
+        video_id = vid_entry["youtube_id"]
+        safe_video_name = sanitize_filename(clean_title)
+        episode_stem = videos_course_dir / f"{course_folder_name} - E{lec_idx:02d} - {safe_video_name}"
+
+        # Update job progress
+        completed_count += 1
+        async with async_session_maker() as session:
+            job = await session.get(Job, job_id)
+            if job:
+                job.current_item = f"Lecture {lec_idx} Video"
+                job.completed_items = completed_count
+                job.progress_percent = 15.0 + (completed_count / total_files) * 80.0
+                await session.commit()
+
+        # Check deduplication
+        existing_res_id = None
+        async with async_session_maker() as session:
+            stmt = select(SourceMetadata).where(
+                SourceMetadata.provider == "youtube",
+                SourceMetadata.source_id == video_id,
+            )
+            res = (await session.exec(stmt)).first()
+            if res:
+                existing_res = await session.get(Resource, res.resource_id)
+                if existing_res:
+                    rel_p = existing_res.data.get("file_path")
+                    if rel_p and (settings.MEDIA_DIR / rel_p).is_file():
+                        existing_res_id = existing_res.id
+
+        if existing_res_id:
+            async with async_session_maker() as session:
+                stmt_ci = select(CollectionItem).where(
+                    CollectionItem.collection_id == target_collection_id,
+                    CollectionItem.resource_id == existing_res_id,
+                )
+                if not (await session.exec(stmt_ci)).first():
+                    session.add(CollectionItem(
+                        collection_id=target_collection_id,
+                        resource_id=existing_res_id,
+                        context="lecture_video",
+                        order_index=lec_idx,
+                    ))
+                    await session.commit()
+            downloaded_videos.append({"index": lec_idx, "resource_id": existing_res_id, "title": clean_title})
+            continue
+
+        # Download with yt-dlp in worker thread
+        try:
+            dl_info = await asyncio.to_thread(
+                download_single_youtube_video,
+                video_url=video_url,
+                output_stem=episode_stem,
+            )
+        except Exception as e:
+            logger.warning(f"Error downloading video {video_id} ({clean_title}): {e}")
+            continue
+
+        mp4_file = Path(f"{episode_stem}.mp4")
+        if not mp4_file.is_file():
+            matched_files = glob.glob(f"{glob.escape(str(episode_stem))}.*")
+            media_matches = [
+                Path(p) for p in matched_files
+                if Path(p).suffix.lower() in (".mp4", ".mkv", ".webm", ".m4v")
+            ]
+            if media_matches:
+                mp4_file = media_matches[0]
+            else:
+                continue
+
+        # Clean duplicate VTTs and resolve primary
+        for extra_vtt in glob.glob(f"{glob.escape(str(episode_stem))}*.en-*.vtt"):
+            try:
+                os.unlink(extra_vtt)
+            except Exception:
+                pass
+
+        vtt_file = Path(f"{episode_stem}.en.vtt")
+        has_subtitles = vtt_file.is_file()
+        duration_sec = dl_info.get("duration")
+        raw_desc = dl_info.get("description") or ""
+
+        # Rich AI Metadata for this lecture
+        lecture_meta = await clean_lecture_metadata(
+            raw_title=clean_title,
+            raw_description=raw_desc,
+            channel="MIT OpenCourseWare",
+            series_institution="MIT",
+        )
+        final_video_title = lecture_meta.title or clean_title
+
+        # Write episode.nfo
+        nfo_path = Path(f"{episode_stem}.nfo")
+        write_episode_nfo(
+            nfo_path=nfo_path,
+            title=final_video_title,
+            episode_number=lec_idx,
+            plot=lecture_meta.summary or raw_desc[:1000],
+            instructors=lecture_meta.instructors,
+            tags=lecture_meta.topic_tags,
+        )
+
+        video_res_id = generate_id("res")
+        video_resource = Resource(
+            id=video_res_id,
+            type="video",
+            title=final_video_title,
+            original_title=clean_title,
+        )
+        video_resource.data = {
+            "duration_seconds": duration_sec,
+            "file_path": str(mp4_file.relative_to(settings.MEDIA_DIR)),
+            "instructors": lecture_meta.instructors,
+            "institution": "MIT",
+            "summary": lecture_meta.summary,
+            "topic_tags": lecture_meta.topic_tags,
+            "slides_url": lecture_meta.slides_url,
+            "resources_url": lecture_meta.resources_url,
+            "has_subtitles": has_subtitles,
+            "has_embedded_chapters": bool(dl_info.get("chapters")),
+        }
+
+        async with async_session_maker() as session:
+            session.add(video_resource)
+            session.add(CollectionItem(
+                collection_id=target_collection_id,
+                resource_id=video_res_id,
+                context="lecture_video",
+                order_index=lec_idx,
+            ))
+
+            src_meta = SourceMetadata(
+                resource_id=video_res_id,
+                provider="youtube",
+                source_url=video_url,
+                source_id=video_id,
+            )
+            try:
+                src_meta.raw_payload = yt_dlp.YoutubeDL().sanitize_info(dl_info)
+            except Exception:
+                src_meta.raw_payload = {}
+            session.add(src_meta)
+
+            for ch_idx, ch in enumerate(dl_info.get("chapters") or []):
+                session.add(Topic(
+                    resource_id=video_res_id,
+                    title=ch.get("title") or f"Topic {ch_idx + 1}",
+                    start_seconds=float(ch.get("start_time", 0)),
+                    end_seconds=float(ch.get("end_time", 0)),
+                    order_index=ch_idx + 1,
+                ))
+
+            if has_subtitles:
+                try:
+                    cues = parse_vtt_content(vtt_file.read_text(encoding="utf-8", errors="replace"))
+                    for cue in cues:
+                        session.add(TranscriptCue(
+                            resource_id=video_res_id,
+                            start_seconds=cue.start_seconds,
+                            end_seconds=cue.end_seconds,
+                            text=cue.text,
+                        ))
+                except Exception:
+                    pass
+
+            await session.commit()
+
+        downloaded_videos.append({"index": lec_idx, "resource_id": video_res_id, "title": final_video_title})
+
     async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
-        # 3. Download and process Lecture Slide PDFs
+        # 4. Download and process Lecture Slide PDFs
         for lec in lecture_notes:
             if is_cancelled_func and is_cancelled_func():
                 return
@@ -306,22 +563,22 @@ async def process_ocw_import(
                     )
                     session.add(t_record)
 
-                # Pair directly with existing Video resource in series if matching order_index
-                if target_series_id:
-                    stmt_v = select(SeriesItem).where(
-                        SeriesItem.parent_series_id == target_series_id,
-                        SeriesItem.order_index == lec_idx,
-                    )
-                    s_item = (await session.exec(stmt_v)).first()
-                    if s_item:
-                        video_res = await session.get(Resource, s_item.child_resource_id)
-                        if video_res and video_res.type == "video":
-                            vdata = video_res.data
-                            vdata["slides_resource_id"] = slide_res_id
-                            vdata["slides_file_path"] = str(file_path.relative_to(settings.MEDIA_DIR))
-                            vdata["slides_url"] = pdf_url
-                            video_res.data = vdata
-                            session.add(video_res)
+                # Pair directly with Video resource in Collection if matching order_index
+                stmt_v = select(CollectionItem).where(
+                    CollectionItem.collection_id == target_collection_id,
+                    CollectionItem.context == "lecture_video",
+                    CollectionItem.order_index == lec_idx,
+                )
+                ci_v = (await session.exec(stmt_v)).first()
+                if ci_v:
+                    video_res = await session.get(Resource, ci_v.resource_id)
+                    if video_res and video_res.type == "video":
+                        vdata = video_res.data
+                        vdata["slides_resource_id"] = slide_res_id
+                        vdata["slides_file_path"] = str(file_path.relative_to(settings.MEDIA_DIR))
+                        vdata["slides_url"] = pdf_url
+                        video_res.data = vdata
+                        session.add(video_res)
 
                 # Add to Collection with context 'companion_slides'
                 stmt_ci = select(CollectionItem).where(
@@ -418,7 +675,7 @@ async def process_ocw_import(
                     job.progress_percent = 15.0 + (completed_count / total_files) * 80.0
                     await session.commit()
 
-    # 5. Update Course Collection manifest with all slides and homework links
+    # 6. Update Course Collection manifest with all slides and homework links
     async with async_session_maker() as session:
         course_col = await session.get(Collection, target_collection_id)
         if course_col:
@@ -435,11 +692,6 @@ async def process_ocw_import(
             job.completed_items = total_files
             job.current_item = None
             await session.commit()
-        if job:
-            job.status = "completed"
-            job.progress_percent = 100.0
-            job.completed_items = total_files
-            job.current_item = None
-            await session.commit()
 
-    logger.info(f"OCW course import completed: {len(downloaded_slides)} slide decks, {len(downloaded_homework)} homework files.")
+    await trigger_jellyfin_refresh()
+    logger.info(f"OCW course import completed: {len(downloaded_videos)} videos, {len(downloaded_slides)} slide decks, {len(downloaded_homework)} homework files.")
