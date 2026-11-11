@@ -1,11 +1,11 @@
-# Course Resource Vault — Design Specification
-*Version 1.4 — November 2026*
+# Course Vault — Design Specification
+*Version 2.0 — November 2026*
 
 ---
 
 ## 1. Executive Summary & Purpose
 
-The **Course Resource Vault** is a private, self-hosted, headless repository built specifically for **knowledge capture** of learning materials. 
+The **Course Vault** is a private, self-hosted, headless repository built specifically for **knowledge capture** of learning materials. 
 
 It is **not** an LMS, and it is **not** an interactive course planner. Instead, it is an unopinionated, canonical media and text archive that ingests educational materials (YouTube playlists, single mega-videos, textbook PDFs, slide decks, audio recordings), captures their knowledge (video, audio, transcripts, timestamped/page-indexed topics), organizes them cleanly on disk for media servers like Jellyfin, and exposes them through a structured, aspect-driven API.
 

@@ -1,11 +1,11 @@
-# Course Resource Vault — Technical Specification
-*Version 1.0 — November 2026*
+# Course Vault — Technical Specification
+*Version 2.0 — November 2026*
 
 ---
 
 ## 1. System Architecture Overview
 
-The **Course Resource Vault** is a single-process, async-first Python application built with **FastAPI**, **SQLModel / SQLite**, and **yt-dlp**. It runs self-hosted and is managed with **uv**.
+The **Course Vault** is a single-process, async-first Python application built with **FastAPI**, **SQLModel / SQLite**, and **yt-dlp**. It runs self-hosted and is managed with **uv**.
 
 ```
                            ┌────────────────────────┐

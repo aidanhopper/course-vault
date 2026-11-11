@@ -21,7 +21,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Course Resource Vault",
+    title="Course Vault",
     description="A private, headless repository for educational knowledge capture, video streaming, and materials management.",
     version=__version__,
     lifespan=lifespan,
@@ -52,7 +52,7 @@ async def health_check():
 @app.get("/", tags=["System"])
 async def root():
     return {
-        "name": "Course Resource Vault",
+        "name": "Course Vault",
         "version": __version__,
         "docs_url": "/docs",
         "api_v1": "/api/v1",

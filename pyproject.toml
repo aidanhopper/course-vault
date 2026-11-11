@@ -1,7 +1,7 @@
 [project]
 name = "course-platform"
 version = "0.1.0"
-description = "Course Resource Vault — Headless knowledge capture & media vault"
+description = "Course Vault — Self-hosted headless repository for course materials"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -17,6 +17,7 @@ dependencies = [
 ]
 
 [project.scripts]
+course-vault = "vault.main:run"
 vault = "vault.main:run"
 
 [build-system]

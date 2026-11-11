@@ -1,4 +1,4 @@
-# Course Resource Vault
+# Course Vault
 
 A private, self-hosted, headless repository built for **knowledge capture** of learning materials. 
 
@@ -36,9 +36,9 @@ uv sync
 cp .env.example .env
 ```
 
-### 3. Run the Vault Server
+### 3. Run the Course Vault Server
 ```bash
-uv run vault
+uv run course-vault
 # Or directly with uvicorn:
 uv run uvicorn vault.main:app --host 0.0.0.0 --port 8000 --reload
 ```
