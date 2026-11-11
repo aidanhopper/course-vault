@@ -53,6 +53,33 @@ uv run pytest
 
 ---
 
+## Docker Deployment (with NFS Export)
+
+Course Vault is designed for ultra-minimal Docker deployments. It separates heavy media storage (perfect for an NFS share or NAS) from the SQLite database.
+
+### 1. Configure `.env`
+Set your AI credentials in `.env`:
+```ini
+AI_API_KEY=AIzaSy...your_gemini_key
+AI_MODEL=gemini-3.5-flash-lite
+```
+
+### 2. Configure `docker-compose.yml`
+Point the media volume to your NFS mount path on the host:
+```yaml
+volumes:
+  - ./data:/data              # Local SQLite database
+  - /mnt/nfs/vault:/media     # Path to your NFS share
+```
+
+### 3. Start the Container
+```bash
+docker compose up -d --build
+```
+Access the Swagger documentation and API at `http://YOUR_SERVER_IP:8000/docs`.
+
+---
+
 ## API Overview
 
 ### Ingestion

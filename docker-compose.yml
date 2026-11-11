@@ -1,0 +1,46 @@
+services:
+  course-vault:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: course-vault:latest
+    container_name: course-vault
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # AI Provider (Google Gemini / OpenAI compatible)
+      - AI_API_KEY=${AI_API_KEY}
+      - AI_BASE_URL=${AI_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai/}
+      - AI_MODEL=${AI_MODEL:-gemini-3.5-flash-lite}
+
+      # Storage paths inside container
+      - VAULT_DATA_DIR=/data
+      - MEDIA_DIR=/media
+      - DATABASE_URL=sqlite+aiosqlite:////data/vault.db
+
+      # Optional Jellyfin webhook for auto-library refresh
+      - JELLYFIN_URL=${JELLYFIN_URL:-}
+      - JELLYFIN_API_KEY=${JELLYFIN_API_KEY:-}
+    volumes:
+      # 1. SQLite Database: Keep local for fast, reliable SQLite locking
+      - ./data:/data
+
+      # 2. Media Storage: Point this to your NFS mount or local path
+      # Replace '/mnt/nfs/vault' with your actual NFS export path
+      - /mnt/nfs/vault:/media
+
+# -------------------------------------------------------------------------
+# OPTIONAL: If you prefer Docker to mount the NFS export directly
+# (instead of mounting it on the host OS at /mnt/nfs/vault):
+# -------------------------------------------------------------------------
+# volumes:
+#   nfs-media:
+#     driver: local
+#     driver_opts:
+#       type: nfs
+#       o: addr=YOUR_NFS_SERVER_IP,rw,nfsvers=4
+#       device: ":/path/to/nfs/export"
+#
+# Then in the service volumes above, use:
+#   - nfs-media:/media
