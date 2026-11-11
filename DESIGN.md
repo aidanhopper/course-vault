@@ -82,7 +82,7 @@ Every resource shares a standard envelope:
 ```json
 {
   "duration_seconds": 3012,
-  "file_path": "Videos/MIT 6.006/MIT 6.006 - E01 - Peak Finding.mp4",
+  "file_path": "videos/MIT 6.006/MIT 6.006 - E01 - Peak Finding.mp4",
   "jellyfin_item_id": "a1b2c3...",
   "has_subtitles": true,
   "has_embedded_chapters": true
@@ -107,7 +107,7 @@ Every resource shares a standard envelope:
 {
   "page_count": 1312,
   "file_format": "pdf",
-  "file_path": "Documents/CLRS_3rd_Edition.pdf",
+  "file_path": "documents/CLRS_3rd_Edition.pdf",
   "table_of_contents_depth": 3
 }
 ```
@@ -117,7 +117,7 @@ Every resource shares a standard envelope:
 {
   "slide_count": 48,
   "file_format": "pdf",
-  "file_path": "Slides/MIT_6006_L01_Slides.pdf"
+  "file_path": "slides/MIT_6006_L01_Slides.pdf"
 }
 ```
 
@@ -125,7 +125,7 @@ Every resource shares a standard envelope:
 ```json
 {
   "duration_seconds": 1840,
-  "file_path": "Audio/Discussion_01.m4a",
+  "file_path": "audio/Discussion_01.m4a",
   "jellyfin_item_id": "d4e5f6..."
 }
 ```
@@ -167,7 +167,7 @@ The Vault uses a unified URL importer. The caller submits a URL, and the interna
 - **Media Download:** Pulls best-quality MP4, burns in chapter markers (`--embed-chapters`), extracts WebVTT captions (`.en.vtt`), and grabs thumbnails (`-thumb.jpg` and `poster.jpg`).
 - **Jellyfin TV-Show Structure (Flat by default):**
   ```
-  Videos/
+  videos/
     MIT 6.006 Introduction to Algorithms/
       poster.jpg
       tvshow.nfo
@@ -180,9 +180,9 @@ The Vault uses a unified URL importer. The caller submits a URL, and the interna
 
 ### 2. Course Page Importer (MIT OpenCourseWare)
 - Accepts official course homepages (e.g. `https://ocw.mit.edu/courses/6-7960-deep-learning-fall-2024/`).
-- Discovers and downloads all lecture slide PDFs, saving to `media/Slides/{Series Title}/`.
+- Discovers and downloads all lecture slide PDFs, saving to `media/slides/{Series Title}/`.
 - Automatically pairs each slide deck 1:1 with its corresponding video lecture in SQLite (`video.data["slides_resource_id"]`).
-- Discovers and downloads all homework problem sets and official solution PDFs into `media/Documents/{Series Title}/`.
+- Discovers and downloads all homework problem sets and official solution PDFs into `media/documents/{Series Title}/`.
 - Extracts syllabus description and prerequisites into the course series manifest (`series.data["prerequisites"]`).
 
 ### 3. Document & Slides Importer (PDF)

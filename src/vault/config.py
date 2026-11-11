@@ -32,7 +32,7 @@ class Settings(BaseSettings):
 
     @property
     def videos_dir(self) -> Path:
-        return self.MEDIA_DIR / "Videos"
+        return self.MEDIA_DIR / "videos"
 
     @property
     def lectures_dir(self) -> Path:
@@ -40,15 +40,15 @@ class Settings(BaseSettings):
 
     @property
     def documents_dir(self) -> Path:
-        return self.MEDIA_DIR / "Documents"
+        return self.MEDIA_DIR / "documents"
 
     @property
     def slides_dir(self) -> Path:
-        return self.MEDIA_DIR / "Slides"
+        return self.MEDIA_DIR / "slides"
 
     @property
     def audio_dir(self) -> Path:
-        return self.MEDIA_DIR / "Audio"
+        return self.MEDIA_DIR / "audio"
 
 
 settings = Settings()

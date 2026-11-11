@@ -36,7 +36,7 @@ async def test_models_crud():
             title="01. Peak Finding",
             original_title="Lecture 1: Peak Finding",
         )
-        video.data = {"duration_seconds": 3012.0, "file_path": "Lectures/MIT/ep01.mp4"}
+        video.data = {"duration_seconds": 3012.0, "file_path": "videos/MIT/ep01.mp4"}
         session.add(video)
 
         # Create SeriesItem link
