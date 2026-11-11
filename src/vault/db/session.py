@@ -8,13 +8,14 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from vault.config import settings
 
-# Ensure data and media directories exist
-settings.VAULT_DATA_DIR.mkdir(parents=True, exist_ok=True)
-settings.MEDIA_DIR.mkdir(parents=True, exist_ok=True)
-settings.videos_dir.mkdir(parents=True, exist_ok=True)
-settings.documents_dir.mkdir(parents=True, exist_ok=True)
-settings.slides_dir.mkdir(parents=True, exist_ok=True)
-settings.audio_dir.mkdir(parents=True, exist_ok=True)
+# Ensure data and media directories exist inside init_db() instead of module import time
+def ensure_directories():
+    settings.VAULT_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    settings.MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+    settings.videos_dir.mkdir(parents=True, exist_ok=True)
+    settings.documents_dir.mkdir(parents=True, exist_ok=True)
+    settings.slides_dir.mkdir(parents=True, exist_ok=True)
+    settings.audio_dir.mkdir(parents=True, exist_ok=True)
 
 engine = create_async_engine(
     settings.DATABASE_URL,
@@ -36,6 +37,7 @@ async_session_maker = sessionmaker(
 
 
 async def init_db() -> None:
+    ensure_directories()
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
         # Add collection_id column to jobs table if it was created in older schema
