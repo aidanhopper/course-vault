@@ -63,6 +63,8 @@ Set your AI credentials and NFS server IP:
 AI_API_KEY=AIzaSy...your_gemini_key
 AI_MODEL=gemini-3.5-flash-lite
 NFS_SERVER=192.168.0.86   # IP address of your NFS server
+PUID=1000                 # User ID matching NFS ownership
+PGID=1000                 # Group ID matching NFS ownership
 ```
 
 ### 2. Verify Your NFS Server Export (`/etc/exports`)

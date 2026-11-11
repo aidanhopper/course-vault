@@ -6,6 +6,7 @@ services:
     image: course-vault:latest
     container_name: course-vault
     restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-1000}"
     ports:
       - "8000:8000"
     environment:

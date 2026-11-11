@@ -20,7 +20,7 @@ COPY src/ src/
 COPY README.md ./
 
 # Install the project into the virtual environment
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev && chmod -R 755 /app
 
 # Ensure default mount directories exist
 RUN mkdir -p /data /media
