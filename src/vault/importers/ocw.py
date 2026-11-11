@@ -15,7 +15,7 @@ from pypdf import PdfReader
 from sqlmodel import select
 import yt_dlp
 
-from vault.ai.cleaner import clean_course_batch, clean_lecture_metadata
+from vault.ai.cleaner import clean_course_batch, clean_lecture_metadata, clean_series_metadata
 from vault.ai.fallback import clean_series_title_fallback, sanitize_filename
 from vault.config import settings
 from vault.db.models import Collection, CollectionItem, Job, Resource, SourceMetadata, Topic, TranscriptCue, generate_id
@@ -262,8 +262,21 @@ async def process_ocw_import(
         if target_collection_id:
             course_col = await session.get(Collection, target_collection_id)
 
-        clean_title, _ = clean_series_title_fallback(slug.replace("-", " ").title())
-        final_title = title_override or (course_col.title if course_col else clean_title)
+        # Build clean academic title using AI metadata cleaner
+        raw_slug_title = f"MIT {slug.replace('-', ' ').title()}"
+        raw_slug_title = re.sub(r'\bMIT\s+(\d+)\s+(\d+)\b', r'MIT \1.\2', raw_slug_title)
+        sample_titles = (
+            [v["title"] for v in lecture_videos]
+            if lecture_videos
+            else [n["title"] for n in lecture_notes]
+        )
+        cleaned_meta = await clean_series_metadata(
+            raw_series_title=raw_slug_title,
+            raw_video_titles=sample_titles,
+            instructor_hint="MIT OpenCourseWare",
+            playlist_description=syllabus_info.get("syllabus_snippet"),
+        )
+        final_title = title_override or (course_col.title if course_col else cleaned_meta.series_title)
 
         if not course_col:
             stmt_col = select(Collection).where(Collection.title == final_title)
@@ -282,7 +295,9 @@ async def process_ocw_import(
                 context="course",
             )
             course_col.data = {
-                "institution": "MIT",
+                "institution": cleaned_meta.institution or "MIT",
+                "instructors": cleaned_meta.instructors,
+                "overview": cleaned_meta.overview,
                 "course_url": course_url,
                 "prerequisites": syllabus_info.get("prerequisites"),
             }
@@ -291,10 +306,16 @@ async def process_ocw_import(
             await session.refresh(course_col)
         else:
             cdata = course_col.data
+            cdata["institution"] = cleaned_meta.institution or "MIT"
+            if cleaned_meta.instructors:
+                cdata["instructors"] = cleaned_meta.instructors
+            if cleaned_meta.overview:
+                cdata["overview"] = cleaned_meta.overview
             if syllabus_info.get("prerequisites"):
                 cdata["prerequisites"] = syllabus_info["prerequisites"]
             cdata["course_url"] = course_url
             course_col.data = cdata
+            course_col.title = final_title
             session.add(course_col)
             await session.commit()
 
