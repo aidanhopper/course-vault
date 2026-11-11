@@ -18,7 +18,7 @@ router = APIRouter(prefix="/resources", tags=["Resources"])
 
 
 def sanitize_resource_data_for_api(resource_id: str, raw_data: Dict[str, Any]) -> Dict[str, Any]:
-    """Strips internal server paths and scraping artifacts, replacing them with clean public media URLs."""
+    """Strips internal server paths, duplicate IDs, and redundant URLs from public API responses."""
     api_data = raw_data.copy()
     api_data.pop("file_path", None)
     api_data.pop("slides_file_path", None)
@@ -30,11 +30,7 @@ def sanitize_resource_data_for_api(resource_id: str, raw_data: Dict[str, Any]) -
     api_data.pop("folder_path", None)
     api_data.pop("jellyfin_item_id", None)
     api_data.pop("jellyfin_series_id", None)
-
-    # Provide direct, actionable streaming link if resource has media
-    if "file_path" in raw_data or "duration_seconds" in raw_data or "slide_count" in raw_data or "page_count" in raw_data:
-        api_data["media_url"] = f"/api/v1/resources/{resource_id}/media"
-
+    api_data.pop("media_url", None)
     return api_data
 
 
