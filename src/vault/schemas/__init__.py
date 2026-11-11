@@ -1,3 +1,11 @@
+from vault.schemas.collection import (
+    AddItemToCollectionRequest,
+    CollectionBase,
+    CollectionCreate,
+    CollectionItemRead,
+    CollectionRead,
+    ResourceCollectionMembership,
+)
 from vault.schemas.job import ImportRequest, ImportResponse, JobRead
 from vault.schemas.resource import (
     AudioData,
@@ -16,13 +24,19 @@ from vault.schemas.topic import TopicBase, TopicRead
 from vault.schemas.transcript import TranscriptCueRead, parse_vtt_content, parse_vtt_timestamp
 
 __all__ = [
+    "AddItemToCollectionRequest",
     "AudioData",
+    "CollectionBase",
+    "CollectionCreate",
+    "CollectionItemRead",
+    "CollectionRead",
     "CourseData",
     "DocumentData",
     "ImportRequest",
     "ImportResponse",
     "JobRead",
     "ResourceBase",
+    "ResourceCollectionMembership",
     "ResourceCreate",
     "ResourceRead",
     "ResourceType",

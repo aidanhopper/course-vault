@@ -6,9 +6,10 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from vault.config import settings
-from vault.db.models import Resource, SeriesItem, SourceMetadata, Topic, TranscriptCue
+from vault.db.models import Collection, CollectionItem, Resource, SeriesItem, SourceMetadata, Topic, TranscriptCue
 from vault.db.session import get_session
 from vault.media.streamer import stream_media_file
+from vault.schemas.collection import ResourceCollectionMembership
 from vault.schemas.resource import ResourceCreate, ResourceRead
 from vault.schemas.topic import TopicRead
 from vault.schemas.transcript import TranscriptCueRead
@@ -98,7 +99,25 @@ async def get_resource(
         updated_at=resource.updated_at,
     )
 
-    # 1. Hydrate topics
+    # 1. Hydrate collections
+    if "collections" in aspects:
+        stmt_c = select(CollectionItem).where(CollectionItem.resource_id == resource_id)
+        c_items = (await session.exec(stmt_c)).all()
+        colls = []
+        for ci in c_items:
+            col = await session.get(Collection, ci.collection_id)
+            if col:
+                colls.append(
+                    ResourceCollectionMembership(
+                        collection_id=col.id,
+                        collection_title=col.title,
+                        collection_context=col.context,
+                        context=ci.context,
+                    )
+                )
+        res_read.collections = colls
+
+    # 2. Hydrate topics
     if "topics" in aspects:
         if resource.type == "series":
             stmt_items = select(SeriesItem).where(SeriesItem.parent_series_id == resource_id).order_by(SeriesItem.order_index)
@@ -151,6 +170,32 @@ async def get_resource(
         res_read.data["items"] = item_list
 
     return res_read
+
+
+@router.get("/{resource_id}/collections", response_model=List[ResourceCollectionMembership], summary="Get collections a resource belongs to")
+async def get_resource_collections(
+    resource_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> List[ResourceCollectionMembership]:
+    resource = await session.get(Resource, resource_id)
+    if not resource:
+        raise HTTPException(status_code=404, detail=f"Resource {resource_id} not found")
+
+    stmt_c = select(CollectionItem).where(CollectionItem.resource_id == resource_id)
+    c_items = (await session.exec(stmt_c)).all()
+    colls = []
+    for ci in c_items:
+        col = await session.get(Collection, ci.collection_id)
+        if col:
+            colls.append(
+                ResourceCollectionMembership(
+                    collection_id=col.id,
+                    collection_title=col.title,
+                    collection_context=col.context,
+                    context=ci.context,
+                )
+            )
+    return colls
 
 
 @router.get("/{resource_id}/topics", response_model=List[TopicRead], summary="Get resource topics")

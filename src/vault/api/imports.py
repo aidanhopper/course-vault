@@ -26,7 +26,9 @@ async def create_import(
         raise HTTPException(status_code=400, detail="URL cannot be empty")
 
     target_id = request.target_resource_id
+    col_id = request.collection_id or (target_id if target_id and target_id.startswith("col_") else None)
     job = Job(
+        collection_id=col_id,
         resource_id=target_id,
         status="queued",
     )
@@ -44,6 +46,7 @@ async def create_import(
 
     return ImportResponse(
         job_id=job.id,
+        collection_id=job.collection_id,
         resource_id=job.resource_id,
         status=job.status,
     )

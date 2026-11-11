@@ -12,7 +12,7 @@ from sqlmodel import select
 
 from vault.ai.fallback import clean_series_title_fallback, sanitize_filename
 from vault.config import settings
-from vault.db.models import Job, Resource, SeriesItem, SourceMetadata, Topic, generate_id
+from vault.db.models import Collection, CollectionItem, Job, Resource, SeriesItem, SourceMetadata, Topic, generate_id
 from vault.db.session import async_session_maker
 from vault.importers.document import extract_pdf_topics
 
@@ -229,6 +229,24 @@ async def process_ocw_import(
             await session.commit()
             await session.refresh(course_res)
 
+        # Resolve or create parent Collection(context='course')
+        stmt_col = select(Collection).where(Collection.title == final_title)
+        course_col = (await session.exec(stmt_col)).first()
+        if not course_col:
+            course_col = Collection(
+                title=final_title,
+                context="course",
+            )
+            course_col.data = {
+                "institution": "MIT",
+                "course_url": course_url,
+                "prerequisites": syllabus_info.get("prerequisites"),
+            }
+            session.add(course_col)
+            await session.commit()
+            await session.refresh(course_col)
+        target_collection_id = course_col.id
+
         target_course_id = course_res.id
         target_series_id = linked_series_res.id if linked_series_res else None
         course_folder_name = sanitize_filename(course_res.title)
@@ -245,6 +263,7 @@ async def process_ocw_import(
 
         job = await session.get(Job, job_id)
         if job:
+            job.collection_id = target_collection_id
             job.resource_id = target_course_id
             job.status = "downloading"
             job.total_items = total_files
@@ -341,6 +360,20 @@ async def process_ocw_import(
                             video_res.data = vdata
                             session.add(video_res)
 
+                # Add to Collection with context 'companion_slides'
+                stmt_ci = select(CollectionItem).where(
+                    CollectionItem.collection_id == target_collection_id,
+                    CollectionItem.resource_id == slide_res_id,
+                )
+                if not (await session.exec(stmt_ci)).first():
+                    c_item = CollectionItem(
+                        collection_id=target_collection_id,
+                        resource_id=slide_res_id,
+                        context="companion_slides",
+                        order_index=lec_idx,
+                    )
+                    session.add(c_item)
+
                 await session.commit()
 
             downloaded_slides.append({
@@ -396,6 +429,14 @@ async def process_ocw_import(
 
             async with async_session_maker() as session:
                 session.add(hw_res)
+                # Link to Collection with context 'solution' or 'problem_set'
+                c_item = CollectionItem(
+                    collection_id=target_collection_id,
+                    resource_id=hw_res_id,
+                    context="solution" if hw["is_solution"] else "problem_set",
+                    order_index=completed_count + 1,
+                )
+                session.add(c_item)
                 await session.commit()
 
             downloaded_homework.append({

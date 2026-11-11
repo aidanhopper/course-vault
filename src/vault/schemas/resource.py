@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
+from vault.schemas.collection import ResourceCollectionMembership
 from vault.schemas.topic import TopicRead
 from vault.schemas.transcript import TranscriptCueRead
 
@@ -82,6 +83,11 @@ class ResourceCreate(ResourceBase):
     pass
 
 
+class ResourceRelationRead(BaseModel):
+    id: str
+    role: str
+
+
 class ResourceRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -93,6 +99,8 @@ class ResourceRead(BaseModel):
     data: Dict[str, Any] = Field(default_factory=dict)
 
     # Optional aspects hydrated when requested via ?include=...
+    collections: List[ResourceCollectionMembership] | None = None
+    relations: List[ResourceRelationRead] | None = None
     topics: List[TopicRead] | None = None
     transcript: List[TranscriptCueRead] | None = None
     source_metadata: Dict[str, Any] | None = None

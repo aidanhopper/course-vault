@@ -11,7 +11,7 @@ from sqlmodel import select
 from vault.ai.cleaner import clean_course_batch, clean_lecture_metadata, clean_series_metadata
 from vault.ai.fallback import clean_title_fallback, sanitize_filename
 from vault.config import settings
-from vault.db.models import Job, Resource, SeriesItem, SourceMetadata, Topic, TranscriptCue, generate_id
+from vault.db.models import Collection, CollectionItem, Job, Resource, SeriesItem, SourceMetadata, Topic, TranscriptCue, generate_id
 from vault.db.session import async_session_maker
 from vault.jellyfin.client import trigger_jellyfin_refresh
 from vault.jellyfin.nfo import write_episode_nfo, write_tvshow_nfo
@@ -183,9 +183,29 @@ async def process_youtube_import(
             await session.commit()
             await session.refresh(series_resource)
 
+        # 3b. Resolve or create parent Course Collection
+        stmt_col = select(Collection).where(Collection.title == final_series_title)
+        course_col = (await session.exec(stmt_col)).first()
+        if not course_col:
+            course_col = Collection(
+                title=final_series_title,
+                context="course",
+            )
+            course_col.data = {
+                "institution": cleaned_meta.institution,
+                "instructors": cleaned_meta.instructors,
+                "channel": uploader,
+                "overview": cleaned_meta.overview,
+            }
+            session.add(course_col)
+            await session.commit()
+            await session.refresh(course_col)
+        target_collection_id = course_col.id
+
         job = await session.get(Job, job_id)
         if job:
-            job.series_id = series_resource.id
+            job.collection_id = target_collection_id
+            job.resource_id = series_resource.id
             job.status = "downloading"
             job.total_items = len(entries)
             job.completed_items = 0
@@ -345,6 +365,20 @@ async def process_youtube_import(
                     )
                     session.add(s_item)
 
+                # Ensure linked to course Collection with context 'lecture_video'
+                stmt_ci = select(CollectionItem).where(
+                    CollectionItem.collection_id == target_collection_id,
+                    CollectionItem.resource_id == existing_res_id,
+                )
+                if not (await session.exec(stmt_ci)).first():
+                    c_item = CollectionItem(
+                        collection_id=target_collection_id,
+                        resource_id=existing_res_id,
+                        context="lecture_video",
+                        order_index=idx + 1,
+                    )
+                    session.add(c_item)
+
                 job = await session.get(Job, job_id)
                 if job:
                     job.completed_items = idx + 1
@@ -453,6 +487,15 @@ async def process_youtube_import(
                 order_index=idx + 1,
             )
             session.add(s_item)
+
+            # Link to course Collection with context 'lecture_video'
+            c_item = CollectionItem(
+                collection_id=target_collection_id,
+                resource_id=video_resource_id,
+                context="lecture_video",
+                order_index=idx + 1,
+            )
+            session.add(c_item)
 
             # Save SourceMetadata
             src_meta = SourceMetadata(

@@ -29,6 +29,12 @@ async_session_maker = sessionmaker(
 async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
+        # Add collection_id column to jobs table if it was created in older schema
+        try:
+            from sqlalchemy import text
+            await conn.execute(text("ALTER TABLE jobs ADD COLUMN collection_id TEXT"))
+        except Exception:
+            pass
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

@@ -69,16 +69,23 @@ uv run pytest
 - `GET /api/v1/jobs/{job_id}` — Check status, progress %, and current item.
 - `POST /api/v1/jobs/{job_id}/cancel` — Cancel active import job.
 
-### Resources (Unified Endpoints)
-- `GET /api/v1/resources` — List resources (optional `?type=video|series|document|slides`).
-- `POST /api/v1/resources` — Create a resource (e.g. create a series or document).
-- `GET /api/v1/resources/{id}` — Get resource details (supports `?include=topics,transcript,source_metadata,items`).
+### Collections (Contextual Groupings)
+- `GET /api/v1/collections` — List collections (supports `?context=course|lecture_session|study_list`).
+- `POST /api/v1/collections` — Create a new collection with arbitrary context (`title`, `context`, `data`).
+- `GET /api/v1/collections/{id}` — Get collection details and its linked items with their specific contexts.
+- `POST /api/v1/collections/{id}/items` — Link a resource with an item context: `{"resource_id": "res_...", "context": "lecture_video", "order_index": 1}`.
+- `DELETE /api/v1/collections/{id}/items/{resource_id}` — Remove a resource from a collection.
+- `DELETE /api/v1/collections/{id}` — Delete a collection.
+
+### Resources (Content Assets)
+- `GET /api/v1/resources` — List resources (optional `?type=video|slides|document|audio`).
+- `POST /api/v1/resources` — Create a resource.
+- `GET /api/v1/resources/{id}` — Get resource details (supports `?include=collections,topics,transcript,source_metadata`).
+- `GET /api/v1/resources/{id}/collections` — Get all collections this resource belongs to, with its context in each.
 - `GET /api/v1/resources/{id}/topics` — Get topic breakdown with start/end seconds or pages.
 - `GET /api/v1/resources/{id}/transcript?format=json|text|vtt` — Get captions/transcript in JSON, plain text, or WebVTT.
 - `GET /api/v1/resources/{id}/source-metadata` — Raw upstream provider metadata dictionary.
 - `GET /api/v1/resources/{id}/media` — Direct byte-range stream of the video/audio/PDF file.
-- `POST /api/v1/resources/{id}/items` — Link a child resource into an ordered series: `{"resource_id": "res_...", "order_index": 1}`.
-- `DELETE /api/v1/resources/{id}/items/{child_id}` — Unlink a child resource from a series.
 - `DELETE /api/v1/resources/{id}` — Permanently delete resource and associated media file.
 
 ---

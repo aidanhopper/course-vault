@@ -36,6 +36,39 @@ class Resource(SQLModel, table=True):
         self.data_json = json.dumps(value, default=str)
 
 
+class Collection(SQLModel, table=True):
+    __tablename__ = "collections"
+
+    id: str = Field(default_factory=lambda: generate_id("col"), primary_key=True)
+    title: str
+    context: str = Field(index=True)  # Arbitrary string proposed by AI or user: e.g. 'course', 'lecture_session'
+    data_json: str = Field(default="{}", sa_column_kwargs={"name": "data"})
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+    @property
+    def data(self) -> Dict[str, Any]:
+        try:
+            return json.loads(self.data_json)
+        except Exception:
+            return {}
+
+    @data.setter
+    def data(self, value: Dict[str, Any]) -> None:
+        self.data_json = json.dumps(value, default=str)
+
+
+class CollectionItem(SQLModel, table=True):
+    __tablename__ = "collection_items"
+
+    id: str = Field(default_factory=lambda: generate_id("citem"), primary_key=True)
+    collection_id: str = Field(index=True, foreign_key="collections.id")
+    resource_id: str = Field(index=True, foreign_key="resources.id")
+    context: str = Field(index=True)  # Role within this collection: e.g. 'lecture_video', 'companion_slides'
+    order_index: int = Field(default=0, index=True)
+    created_at: datetime = Field(default_factory=utc_now)
+
+
 class SeriesItem(SQLModel, table=True):
     __tablename__ = "series_items"
 
@@ -43,6 +76,16 @@ class SeriesItem(SQLModel, table=True):
     parent_series_id: str = Field(index=True, foreign_key="resources.id")
     child_resource_id: str = Field(index=True, foreign_key="resources.id")
     order_index: int = Field(index=True)
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class ResourceRelation(SQLModel, table=True):
+    __tablename__ = "resource_relations"
+
+    id: str = Field(default_factory=lambda: generate_id("rel"), primary_key=True)
+    source_resource_id: str = Field(index=True, foreign_key="resources.id")
+    target_resource_id: str = Field(index=True, foreign_key="resources.id")
+    role: str = Field(index=True)  # 'slides', 'homework', 'solution', 'series', 'syllabus', 'reading', 'prerequisite'
     created_at: datetime = Field(default_factory=utc_now)
 
 
@@ -102,6 +145,7 @@ class Job(SQLModel, table=True):
     __tablename__ = "jobs"
 
     id: str = Field(default_factory=lambda: generate_id("job"), primary_key=True)
+    collection_id: str | None = Field(default=None, index=True)
     resource_id: str | None = Field(default=None, index=True, sa_column_kwargs={"name": "series_id"})
     status: str = Field(default="queued", index=True)  # queued, extracting, cleaning, downloading, completed, failed, cancelled
     progress_percent: float = Field(default=0.0)
