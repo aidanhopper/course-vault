@@ -40,7 +40,7 @@ volumes:
     driver: local
     driver_opts:
       type: nfs
-      o: "addr=${NFS_SERVER:-192.168.0.10},rw,sync,no_subtree_check"
+      o: "addr=${NFS_SERVER:-192.168.0.10},rw,nfsvers=4"
       device: ":/srv/media/vault/data"
 
   # Native Docker NFS Mount for /srv/media/vault/media
@@ -48,5 +48,5 @@ volumes:
     driver: local
     driver_opts:
       type: nfs
-      o: "addr=${NFS_SERVER:-192.168.0.10},rw,sync,no_subtree_check"
+      o: "addr=${NFS_SERVER:-192.168.0.10},rw,nfsvers=4"
       device: ":/srv/media/vault/media"
