@@ -23,24 +23,30 @@ services:
       - JELLYFIN_URL=${JELLYFIN_URL:-}
       - JELLYFIN_API_KEY=${JELLYFIN_API_KEY:-}
     volumes:
-      # 1. SQLite Database: Keep local for fast, reliable SQLite locking
-      - ./data:/data
+      # NFS Volumes for /srv/media export: /srv/media/vault/{data, media}
+      - nfs-vault-data:/data
+      - nfs-vault-media:/media
 
-      # 2. Media Storage: Point this to your NFS mount or local path
-      # Replace '/mnt/nfs/vault' with your actual NFS export path
-      - /mnt/nfs/vault:/media
+      # ---------------------------------------------------------------------
+      # ALTERNATIVE: If /srv/media is already mounted on the Docker host OS,
+      # comment out the nfs named volumes above and use direct host paths:
+      # ---------------------------------------------------------------------
+      # - /srv/media/vault/data:/data
+      # - /srv/media/vault/media:/media
 
-# -------------------------------------------------------------------------
-# OPTIONAL: If you prefer Docker to mount the NFS export directly
-# (instead of mounting it on the host OS at /mnt/nfs/vault):
-# -------------------------------------------------------------------------
-# volumes:
-#   nfs-media:
-#     driver: local
-#     driver_opts:
-#       type: nfs
-#       o: addr=YOUR_NFS_SERVER_IP,rw,nfsvers=4
-#       device: ":/path/to/nfs/export"
-#
-# Then in the service volumes above, use:
-#   - nfs-media:/media
+volumes:
+  # Native Docker NFS Mount for /srv/media/vault/data
+  nfs-vault-data:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: "addr=${NFS_SERVER:-192.168.0.10},rw,sync,no_subtree_check"
+      device: ":/srv/media/vault/data"
+
+  # Native Docker NFS Mount for /srv/media/vault/media
+  nfs-vault-media:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: "addr=${NFS_SERVER:-192.168.0.10},rw,sync,no_subtree_check"
+      device: ":/srv/media/vault/media"

@@ -1,5 +1,6 @@
 from collections.abc import AsyncGenerator
 from pathlib import Path
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import SQLModel
@@ -20,6 +21,14 @@ engine = create_async_engine(
     echo=False,
     future=True,
 )
+
+# NFS-safe SQLite pragmas: busy_timeout prevents lock contention; DELETE journal avoids NFS shared memory (.shm) bugs
+@event.listens_for(engine.sync_engine, "connect")
+def set_sqlite_pragma(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA busy_timeout = 10000")
+    cursor.execute("PRAGMA journal_mode = DELETE")
+    cursor.close()
 
 async_session_maker = sessionmaker(
     engine, class_=AsyncSession, expire_on_commit=False
