@@ -222,7 +222,7 @@ async def fetch_ocw_videos(course_url: str, client: httpx.AsyncClient) -> List[D
 async def process_ocw_import(
     job_id: str,
     url: str,
-    series_id: Optional[str] = None,
+    target_collection_id: Optional[str] = None,
     title_override: Optional[str] = None,
     is_cancelled_func: Optional[Callable[[], bool]] = None,
 ) -> None:
@@ -256,12 +256,17 @@ async def process_ocw_import(
 
     # 2. Resolve or Create Course Collection
     async with async_session_maker() as session:
-        clean_title, _ = clean_series_title_fallback(slug.replace("-", " ").title())
-        final_title = title_override or clean_title
+        course_col = None
+        if target_collection_id:
+            course_col = await session.get(Collection, target_collection_id)
 
-        # Resolve or create parent Collection(context='course')
-        stmt_col = select(Collection).where(Collection.title == final_title)
-        course_col = (await session.exec(stmt_col)).first()
+        clean_title, _ = clean_series_title_fallback(slug.replace("-", " ").title())
+        final_title = title_override or (course_col.title if course_col else clean_title)
+
+        if not course_col:
+            stmt_col = select(Collection).where(Collection.title == final_title)
+            course_col = (await session.exec(stmt_col)).first()
+
         if not course_col:
             all_cols = (await session.exec(select(Collection))).all()
             for c in all_cols:
