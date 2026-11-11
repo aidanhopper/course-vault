@@ -129,14 +129,13 @@ course-platform/
 All IDs are generated as **ULID** or **UUIDv7** strings (sortable, collision-free, URL-safe: `res_01J9...`).
 
 ### 1. `resources`
-The core unified table for all assets (atomic media and composite series):
+The core table for all physical/digital content assets:
 
 ```sql
 CREATE TABLE resources (
     id TEXT PRIMARY KEY,
-    type TEXT NOT NULL,                -- 'video', 'series', 'document', 'slides', 'audio'
+    type TEXT NOT NULL,                -- 'video', 'slides', 'document', 'audio'
     title TEXT NOT NULL,               -- Clean canonical title
-    original_title TEXT,               -- Raw source title from provider
     data JSON NOT NULL DEFAULT '{}',   -- Discriminated type-specific JSON payload
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -144,23 +143,39 @@ CREATE TABLE resources (
 CREATE INDEX ix_resources_type ON resources(type);
 ```
 
-### 2. `series_items`
-Ordered sequence join table:
+### 2. `collections`
+The master table for all contextual groupings:
 
 ```sql
-CREATE TABLE series_items (
+CREATE TABLE collections (
     id TEXT PRIMARY KEY,
-    parent_series_id TEXT NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
-    child_resource_id TEXT NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
-    order_index INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    context TEXT NOT NULL,             -- Arbitrary context: 'course', 'lecture_session', 'homework_pack'
+    data JSON NOT NULL DEFAULT '{}',   -- Contextual metadata (institution, instructors, prerequisites)
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(parent_series_id, child_resource_id),
-    UNIQUE(parent_series_id, order_index)
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX ix_series_items_parent ON series_items(parent_series_id);
+CREATE INDEX ix_collections_context ON collections(context);
 ```
 
-### 3. `topics`
+### 3. `collection_items`
+Join table linking resources to collections with item-level role/context:
+
+```sql
+CREATE TABLE collection_items (
+    id TEXT PRIMARY KEY,
+    collection_id TEXT NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+    resource_id TEXT NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
+    context TEXT NOT NULL,             -- Role: 'lecture_video', 'companion_slides', 'problem_set', 'solution'
+    order_index INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(collection_id, resource_id)
+);
+CREATE INDEX ix_collection_items_col ON collection_items(collection_id);
+CREATE INDEX ix_collection_items_res ON collection_items(resource_id);
+```
+
+### 4. `topics`
 Knowledge segments attached to any resource:
 
 ```sql

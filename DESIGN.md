@@ -33,100 +33,111 @@ Downstream consumers—such as Jellyfin apps on TV/mobile, an AI tutor, or a cus
 
 ## 3. Domain Model (Composite Pattern)
 
+## 3. Domain Model: Content (`Resource`) vs. Context (`Collection`)
+
+The Vault maintains a strict separation between **digital content assets** and **contextual groupings**:
+
 ```
                        ┌─────────────────────────────┐
-                       │          Resource           │
-                       │   (Unified Core Entity)     │
+                       │         Collection          │
+                       │    (Contextual Grouping)    │
+                       │ - context: arbitrary string │
+                       │   ('course', 'session'...)  │
                        └──────────────┬──────────────┘
-                                      │
-            ┌─────────────────────────┴─────────────────────────┐
-            ▼                                                   ▼
-┌─────────────────────────────┐                     ┌─────────────────────────────┐
-│       Atomic Resource       │                     │      Composite Resource     │
-│  - type: "video"            │                     │  - type: "series"           │
-│  - type: "document"         │                     │  - defines ordered sequence │
-│  - type: "slides"           │                     │    of child resources       │
-│  - type: "audio"            │                     └──────────────┬──────────────┘
-└──────────────┬──────────────┘                                    │
-               │ 1-to-many                                         │ orders
-               ▼                                                   ▼
-┌─────────────────────────────┐                     ┌─────────────────────────────┐
-│            Topic            │                     │         SeriesItem          │
-│  - Video: start/end seconds │                     │  - parent_series_id         │
-│  - Book:  start/end pages   │                     │  - child_resource_id        │
-└─────────────────────────────┘                     │  - order_index (1, 2, 3...) │
-                                                    └─────────────────────────────┘
+                                      │ groups items
+                                      ▼
+                       ┌─────────────────────────────┐
+                       │       CollectionItem        │
+                       │ - resource_id               │
+                       │ - context: item role        │
+                       │ - order_index               │
+                       └──────────────┬──────────────┘
+                                      │ points to
+                                      ▼
+                       ┌─────────────────────────────┐
+                       │          Resource           │
+                       │    (Digital Content)        │
+                       │ - type: video|slides|doc    │
+                       └──────────────┬──────────────┘
+                                      │ 1-to-many
+                                      ▼
+                       ┌─────────────────────────────┐
+                       │            Topic            │
+                       │ - start/end seconds or page │
+                       └─────────────────────────────┘
 ```
 
-### Base Resource Envelope
+### 1. The Resource (Pure Content Asset)
 
-Every resource shares a standard envelope:
+Every resource represents a physical digital asset stored once in the vault:
 
 ```json
 {
-  "id": "res_01J9...",
-  "type": "video | series | document | slides | audio",
-  "title": "Clean Canonical Title",
-  "original_title": "Raw Source Title",
-  "created_at": "2026-11-08T12:00:00Z",
-
-  "data": { ... }
+  "id": "res_2afaee35985b4fac",
+  "type": "video",
+  "title": "Introduction to Deep Learning",
+  "created_at": "2026-11-09T02:05:51Z",
+  "updated_at": "2026-11-09T02:05:51Z",
+  "data": {
+    "duration_seconds": 3651,
+    "media_url": "/api/v1/resources/res_2afaee35985b4fac/media",
+    "institution": "MIT",
+    "instructors": ["Sara Beery"],
+    "summary": "Introduction to deep neural networks, covering fundamental building blocks.",
+    "topic_tags": ["Deep Learning", "Neural Networks", "Activation Functions"],
+    "has_subtitles": true,
+    "has_embedded_chapters": true
+  }
 }
 ```
+
+### Resource Types
+
+- **`video`:** Lecture recordings, walkthroughs, conference talks (MP4, embedded chapters, VTT subtitles).
+- **`slides`:** Presentation slide decks (PDF, slide count, outline topics).
+- **`document`:** Problem sets, official solutions, syllabi, reading papers (PDF).
+- **`audio`:** Audio-only recordings, podcasts.
 
 ---
 
-### Type-Specific `data` Schemas
+### 2. The Collection (Contextual Grouping)
 
-#### 1. `type: "video"` (YouTube Lecture / Video)
+A Collection has no media files of its own. It is a contextual lens that groups resources together with arbitrary context at both the collection level and the item level:
+
 ```json
 {
-  "duration_seconds": 3012,
-  "file_path": "videos/MIT 6.006/MIT 6.006 - E01 - Peak Finding.mp4",
-  "jellyfin_item_id": "a1b2c3...",
-  "has_subtitles": true,
-  "has_embedded_chapters": true
-}
-```
-
-#### 2. `type: "series"` (Ordered Sequence of Videos)
-```json
-{
-  "instructor": "Erik Demaine, Srini Devadas",
-  "overview": "Clean course overview...",
-  "jellyfin_series_id": "s1t2u3...",
+  "id": "col_mit67960",
+  "context": "course",
+  "title": "MIT 6.7960 Deep Learning",
+  "data": {
+    "institution": "MIT",
+    "instructors": ["Phillip Isola", "Sara Beery", "Jeremy Bernstein"],
+    "course_url": "https://ocw.mit.edu/courses/6-7960-deep-learning-fall-2024/",
+    "prerequisites": "Students should have taken 18.05 and one of 6.3720, 6.3900, or 6.C01."
+  },
   "items": [
-    { "order_index": 1, "resource_id": "res_peak_finding" },
-    { "order_index": 2, "resource_id": "res_models_of_computation" }
+    {
+      "resource_id": "res_video_01",
+      "context": "lecture_video",
+      "order_index": 1,
+      "title": "Introduction to Deep Learning",
+      "type": "video"
+    },
+    {
+      "resource_id": "res_slides_01",
+      "context": "companion_slides",
+      "order_index": 1,
+      "title": "Lecture 01 Slides",
+      "type": "slides"
+    },
+    {
+      "resource_id": "res_hw_01",
+      "context": "problem_set",
+      "order_index": 1,
+      "title": "6.7960 Homework 1",
+      "type": "document"
+    }
   ]
-}
-```
-
-#### 3. `type: "document"` (Textbook / Reading)
-```json
-{
-  "page_count": 1312,
-  "file_format": "pdf",
-  "file_path": "documents/CLRS_3rd_Edition.pdf",
-  "table_of_contents_depth": 3
-}
-```
-
-#### 4. `type: "slides"` (Lecture Slide Deck)
-```json
-{
-  "slide_count": 48,
-  "file_format": "pdf",
-  "file_path": "slides/MIT_6006_L01_Slides.pdf"
-}
-```
-
-#### 5. `type: "audio"` (Audio Recording / Podcast)
-```json
-{
-  "duration_seconds": 1840,
-  "file_path": "audio/Discussion_01.m4a",
-  "jellyfin_item_id": "d4e5f6..."
 }
 ```
 
