@@ -215,7 +215,7 @@ If any field is missing or cannot be found in the description/title, set it to n
 2. 'instructors': Array of human professors or speakers who delivered this lecture (e.g. ['Sara Beery']). If not found, []. Do NOT use the institution/channel name if no person is named.
 3. 'institution': University or organization (e.g. 'MIT'). If not found, null.
 4. 'summary': 1-2 sentence academic summary of what is taught in this specific video.
-5. 'topic_tags': 2-5 specific concept tags taught in this lecture (e.g. ['Deep Neural Networks', 'Neural Network Foundations']).
+5. 'topic_tags': 6-12 deep, granular, and precise academic concept tags. Do NOT stop at generic labels like 'Deep Learning' or 'Education'. Extract specific mathematical foundations (e.g. 'Universal Approximation', 'Empirical Risk Minimization'), concrete algorithms & mechanisms (e.g. 'Backpropagation', 'Stochastic Gradient Descent', 'Multi-Head Attention', 'ReLU', 'Perceptrons'), and theoretical phenomena (e.g. 'Double Descent', 'Inductive Bias', 'Vanishing Gradients').
 6. 'slides_url': URL to lecture slides or PDF if mentioned in the description, else null.
 7. 'resources_url': URL to companion course materials, problem sets, or code if mentioned in the description, else null.
 
@@ -372,7 +372,7 @@ Rules:
    - 'title': Clean topic title without lecture numbers or resolution tags (e.g. 'Introduction to Deep Learning')
    - 'instructor': Specific professor who delivered this lecture (e.g. 'Sara Beery'). Look in the lecture's description! If not found, null.
    - 'summary': 1-sentence summary of what is taught
-   - 'topic_tags': 2-4 concept tags taught in this lecture
+   - 'topic_tags': 6-12 deep, granular, and precise academic concept tags. Do NOT stop at generic labels like 'Deep Learning'. Extract specific mathematical principles, algorithms, mechanisms, and architectures (e.g. ['Empirical Risk Minimization', 'Backpropagation', 'Stochastic Gradient Descent', 'Activation Functions', 'ReLU', 'Perceptrons'])
    - 'slides_url': URL to slides if mentioned in description, else null
    - 'resources_url': URL to course page or code if mentioned in description, else null
 
