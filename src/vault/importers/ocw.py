@@ -16,7 +16,7 @@ import yt_dlp
 from vault.ai.cleaner import clean_course_batch, clean_lecture_metadata
 from vault.ai.fallback import clean_series_title_fallback, sanitize_filename
 from vault.config import settings
-from vault.db.models import Collection, CollectionItem, Job, Resource, SeriesItem, SourceMetadata, Topic, TranscriptCue, generate_id
+from vault.db.models import Collection, CollectionItem, Job, Resource, SourceMetadata, Topic, TranscriptCue, generate_id
 from vault.db.session import async_session_maker
 from vault.importers.document import extract_pdf_topics
 from vault.importers.youtube import download_single_youtube_video

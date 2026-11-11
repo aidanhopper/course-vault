@@ -5,13 +5,7 @@ from pydantic import BaseModel, ConfigDict
 class ImportRequest(BaseModel):
     url: str
     collection_id: str | None = None
-    resource_id: str | None = None
-    series_id: str | None = None  # Legacy alias
     title_override: str | None = None
-
-    @property
-    def target_resource_id(self) -> str | None:
-        return self.resource_id or self.series_id or self.collection_id
 
 
 class ImportResponse(BaseModel):

@@ -75,4 +75,3 @@ class ResourceRead(BaseModel):
     topics: List[TopicRead] | None = None
     transcript: List[TranscriptCueRead] | None = None
     source_metadata: Dict[str, Any] | None = None
-    items: List[Dict[str, Any]] | None = None

@@ -17,7 +17,7 @@ class Resource(SQLModel, table=True):
     __tablename__ = "resources"
 
     id: str = Field(default_factory=lambda: generate_id("res"), primary_key=True)
-    type: str = Field(index=True)  # 'video', 'series', 'document', 'slides', 'audio'
+    type: str = Field(index=True)  # 'video', 'slides', 'document', 'audio'
     title: str
     original_title: str | None = None
     data_json: str = Field(default="{}", sa_column_kwargs={"name": "data"})
@@ -69,23 +69,13 @@ class CollectionItem(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utc_now)
 
 
-class SeriesItem(SQLModel, table=True):
-    __tablename__ = "series_items"
-
-    id: str = Field(default_factory=lambda: generate_id("sitem"), primary_key=True)
-    parent_series_id: str = Field(index=True, foreign_key="resources.id")
-    child_resource_id: str = Field(index=True, foreign_key="resources.id")
-    order_index: int = Field(index=True)
-    created_at: datetime = Field(default_factory=utc_now)
-
-
 class ResourceRelation(SQLModel, table=True):
     __tablename__ = "resource_relations"
 
     id: str = Field(default_factory=lambda: generate_id("rel"), primary_key=True)
     source_resource_id: str = Field(index=True, foreign_key="resources.id")
     target_resource_id: str = Field(index=True, foreign_key="resources.id")
-    role: str = Field(index=True)  # 'slides', 'homework', 'solution', 'series', 'syllabus', 'reading', 'prerequisite'
+    role: str = Field(index=True)  # 'slides', 'homework', 'solution', 'reading', 'prerequisite'
     created_at: datetime = Field(default_factory=utc_now)
 
 
@@ -146,7 +136,7 @@ class Job(SQLModel, table=True):
 
     id: str = Field(default_factory=lambda: generate_id("job"), primary_key=True)
     collection_id: str | None = Field(default=None, index=True)
-    resource_id: str | None = Field(default=None, index=True, sa_column_kwargs={"name": "series_id"})
+    resource_id: str | None = Field(default=None, index=True)
     status: str = Field(default="queued", index=True)  # queued, extracting, cleaning, downloading, completed, failed, cancelled
     progress_percent: float = Field(default=0.0)
     total_items: int = Field(default=0)
@@ -155,11 +145,3 @@ class Job(SQLModel, table=True):
     error_message: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
-
-    @property
-    def series_id(self) -> str | None:
-        return self.resource_id
-
-    @series_id.setter
-    def series_id(self, value: str | None) -> None:
-        self.resource_id = value

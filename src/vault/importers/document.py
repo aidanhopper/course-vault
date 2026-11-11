@@ -6,7 +6,7 @@ from pypdf import PdfReader
 
 from vault.ai.fallback import sanitize_filename
 from vault.config import settings
-from vault.db.models import Resource, Topic, generate_id
+from vault.db.models import CollectionItem, Resource, Topic, generate_id
 from vault.db.session import async_session_maker
 
 logger = logging.getLogger(__name__)
@@ -56,7 +56,7 @@ def extract_pdf_topics(reader: PdfReader) -> List[Dict[str, Any]]:
 async def import_pdf_document(
     url: str,
     title_override: str | None = None,
-    series_id: str | None = None,
+    collection_id: str | None = None,
 ) -> Resource:
     """Downloads a PDF from a URL, extracts metadata and topics, and stores as a document or slides resource."""
     # 1. Download PDF to temporary location
@@ -125,6 +125,14 @@ async def import_pdf_document(
                 order_index=top_dict["order_index"],
             )
             session.add(topic)
+
+        if collection_id:
+            session.add(CollectionItem(
+                collection_id=collection_id,
+                resource_id=resource_id,
+                context=resource_type,
+            ))
+
         await session.commit()
         await session.refresh(resource)
 

@@ -11,7 +11,7 @@ from sqlmodel import select
 from vault.ai.cleaner import clean_course_batch, clean_lecture_metadata, clean_series_metadata
 from vault.ai.fallback import clean_title_fallback, sanitize_filename
 from vault.config import settings
-from vault.db.models import Collection, CollectionItem, Job, Resource, SeriesItem, SourceMetadata, Topic, TranscriptCue, generate_id
+from vault.db.models import Collection, CollectionItem, Job, Resource, SourceMetadata, Topic, TranscriptCue, generate_id
 from vault.db.session import async_session_maker
 from vault.jellyfin.client import trigger_jellyfin_refresh
 from vault.jellyfin.nfo import write_episode_nfo, write_tvshow_nfo
@@ -90,7 +90,7 @@ def download_single_youtube_video(
 async def process_youtube_import(
     job_id: str,
     url: str,
-    target_series_id: Optional[str] = None,
+    target_collection_id: Optional[str] = None,
     title_override: Optional[str] = None,
     is_cancelled_func: Optional[Callable[[], bool]] = None,
 ) -> None:
@@ -160,32 +160,16 @@ async def process_youtube_import(
     series_dir = settings.videos_dir / clean_folder_name
     series_dir.mkdir(parents=True, exist_ok=True)
 
-    # 3. Create or resolve Series Resource
+    # 3. Resolve or create parent Course Collection
     async with async_session_maker() as session:
-        series_resource = None
-        if target_series_id:
-            series_resource = await session.get(Resource, target_series_id)
+        course_col = None
+        if target_collection_id:
+            course_col = await session.get(Collection, target_collection_id)
 
-        if not series_resource:
-            series_resource = Resource(
-                type="series",
-                title=final_series_title,
-                original_title=raw_series_title,
-            )
-            series_resource.data = {
-                "institution": cleaned_meta.institution,
-                "instructors": cleaned_meta.instructors,
-                "channel": uploader,
-                "overview": cleaned_meta.overview,
-                "folder_path": str(series_dir.relative_to(settings.MEDIA_DIR)),
-            }
-            session.add(series_resource)
-            await session.commit()
-            await session.refresh(series_resource)
+        if not course_col:
+            stmt_col = select(Collection).where(Collection.title == final_series_title)
+            course_col = (await session.exec(stmt_col)).first()
 
-        # 3b. Resolve or create parent Course Collection
-        stmt_col = select(Collection).where(Collection.title == final_series_title)
-        course_col = (await session.exec(stmt_col)).first()
         if not course_col:
             course_col = Collection(
                 title=final_series_title,
@@ -205,7 +189,6 @@ async def process_youtube_import(
         job = await session.get(Job, job_id)
         if job:
             job.collection_id = target_collection_id
-            job.resource_id = series_resource.id
             job.status = "downloading"
             job.total_items = len(entries)
             job.completed_items = 0
@@ -352,19 +335,6 @@ async def process_youtube_import(
                             tags=tags,
                         )
 
-                # Ensure linked to this series
-                stmt_item = select(SeriesItem).where(
-                    SeriesItem.parent_series_id == series_resource.id,
-                    SeriesItem.child_resource_id == existing_res_id,
-                )
-                if not (await session.exec(stmt_item)).first():
-                    s_item = SeriesItem(
-                        parent_series_id=series_resource.id,
-                        child_resource_id=existing_res_id,
-                        order_index=idx + 1,
-                    )
-                    session.add(s_item)
-
                 # Ensure linked to course Collection with context 'lecture_video'
                 stmt_ci = select(CollectionItem).where(
                     CollectionItem.collection_id == target_collection_id,
@@ -479,14 +449,6 @@ async def process_youtube_import(
 
         async with async_session_maker() as session:
             session.add(video_resource)
-
-            # Link to Series
-            s_item = SeriesItem(
-                parent_series_id=series_resource.id,
-                child_resource_id=video_resource_id,
-                order_index=idx + 1,
-            )
-            session.add(s_item)
 
             # Link to course Collection with context 'lecture_video'
             c_item = CollectionItem(

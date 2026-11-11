@@ -38,14 +38,14 @@ class JobQueue:
         self,
         job_id: str,
         url: str,
-        resource_id: Optional[str] = None,
+        collection_id: Optional[str] = None,
         title_override: Optional[str] = None,
     ) -> None:
         """Enqueues an import job to be processed."""
         await self.queue.put({
             "job_id": job_id,
             "url": url,
-            "resource_id": resource_id,
+            "collection_id": collection_id,
             "title_override": title_override,
         })
         logger.info(f"Enqueued job {job_id} for URL {url}")
@@ -65,7 +65,7 @@ class JobQueue:
                 task_data = await self.queue.get()
                 job_id = task_data["job_id"]
                 url = task_data["url"]
-                resource_id = task_data.get("resource_id") or task_data.get("series_id")
+                collection_id = task_data.get("collection_id")
                 title_override = task_data.get("title_override")
 
                 if not job_id or not url:
@@ -81,7 +81,7 @@ class JobQueue:
                     await run_import_job(
                         job_id=job_id,
                         url=url,
-                        resource_id=resource_id,
+                        collection_id=collection_id,
                         title_override=title_override,
                         is_cancelled_func=lambda j=job_id: self.is_cancelled(j),
                     )

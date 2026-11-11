@@ -5,7 +5,7 @@ from vault.db.models import (
     CollectionItem,
     Job,
     Resource,
-    SeriesItem,
+    ResourceRelation,
     SourceMetadata,
     Topic,
     TranscriptCue,
@@ -19,35 +19,17 @@ async def test_models_crud():
     await init_db()
 
     async with async_session_maker() as session:
-        # Create Series Resource
-        series = Resource(
-            id=generate_id("ser"),
-            type="series",
-            title="MIT 6.006",
-            original_title="MIT 6.006 Fall 2011",
-        )
-        series.data = {"instructor": "Erik Demaine"}
-        session.add(series)
-
-        # Create Video Resource
+        # 1. Create Video Resource
         video = Resource(
             id=generate_id("res"),
             type="video",
-            title="01. Peak Finding",
+            title="Peak Finding",
             original_title="Lecture 1: Peak Finding",
         )
-        video.data = {"duration_seconds": 3012.0, "file_path": "videos/MIT/ep01.mp4"}
+        video.data = {"duration_seconds": 3012.0}
         session.add(video)
 
-        # Create SeriesItem link
-        item = SeriesItem(
-            parent_series_id=series.id,
-            child_resource_id=video.id,
-            order_index=1,
-        )
-        session.add(item)
-
-        # Create Topic
+        # 2. Create Topic
         topic = Topic(
             resource_id=video.id,
             title="1D Peak Finding",
@@ -57,7 +39,7 @@ async def test_models_crud():
         )
         session.add(topic)
 
-        # Create TranscriptCue
+        # 3. Create TranscriptCue
         cue = TranscriptCue(
             resource_id=video.id,
             start_seconds=120.0,
@@ -66,7 +48,7 @@ async def test_models_crud():
         )
         session.add(cue)
 
-        # Create SourceMetadata
+        # 4. Create SourceMetadata
         src = SourceMetadata(
             resource_id=video.id,
             provider="youtube",
@@ -75,18 +57,10 @@ async def test_models_crud():
         src.raw_payload = {"view_count": 50000}
         session.add(src)
 
-        # Create Job
-        job = Job(
-            series_id=series.id,
-            status="queued",
-            progress_percent=0.0,
-        )
-        session.add(job)
-
-        # Create Collection and CollectionItem
+        # 5. Create Collection and CollectionItem
         col = Collection(
             id=generate_id("col"),
-            title="MIT 6.006",
+            title="MIT 6.006 Introduction to Algorithms",
             context="course",
         )
         col.data = {"institution": "MIT"}
@@ -100,23 +74,29 @@ async def test_models_crud():
         )
         session.add(c_item)
 
+        # 6. Create Job
+        job = Job(
+            collection_id=col.id,
+            status="queued",
+            progress_percent=0.0,
+        )
+        session.add(job)
+
         await session.commit()
 
         # Query back and verify
         fetched_col = await session.get(Collection, col.id)
         assert fetched_col is not None
         assert fetched_col.context == "course"
+        assert fetched_col.data["institution"] == "MIT"
 
         ci_list = (await session.exec(select(CollectionItem).where(CollectionItem.collection_id == col.id))).all()
         assert len(ci_list) == 1
         assert ci_list[0].context == "lecture_video"
-        fetched_series = await session.get(Resource, series.id)
-        assert fetched_series is not None
-        assert fetched_series.type == "series"
-        assert fetched_series.data["instructor"] == "Erik Demaine"
 
         fetched_video = await session.get(Resource, video.id)
         assert fetched_video is not None
+        assert fetched_video.type == "video"
         assert fetched_video.data["duration_seconds"] == 3012.0
 
         topics = (await session.exec(select(Topic).where(Topic.resource_id == video.id))).all()
