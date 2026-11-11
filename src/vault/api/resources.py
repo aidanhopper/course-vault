@@ -119,18 +119,9 @@ async def get_resource(
 
     # 2. Hydrate topics
     if "topics" in aspects:
-        if resource.type == "series":
-            stmt_items = select(SeriesItem).where(SeriesItem.parent_series_id == resource_id).order_by(SeriesItem.order_index)
-            s_items = (await session.exec(stmt_items)).all()
-            all_topics = []
-            for s_it in s_items:
-                stmt_t = select(Topic).where(Topic.resource_id == s_it.child_resource_id).order_by(Topic.order_index)
-                all_topics.extend((await session.exec(stmt_t)).all())
-            res_read.topics = [TopicRead.model_validate(t) for t in all_topics]
-        else:
-            stmt = select(Topic).where(Topic.resource_id == resource_id).order_by(Topic.order_index)
-            topics = (await session.exec(stmt)).all()
-            res_read.topics = [TopicRead.model_validate(t) for t in topics]
+        stmt = select(Topic).where(Topic.resource_id == resource_id).order_by(Topic.order_index)
+        topics = (await session.exec(stmt)).all()
+        res_read.topics = [TopicRead.model_validate(t) for t in topics]
 
     # 2. Hydrate transcript cues
     if "transcript" in aspects:
@@ -138,7 +129,7 @@ async def get_resource(
         cues = (await session.exec(stmt)).all()
         res_read.transcript = [TranscriptCueRead.model_validate(c) for c in cues]
 
-    # 3. Hydrate source metadata
+    # 4. Hydrate source metadata
     if "source_metadata" in aspects or "youtube_metadata" in aspects:
         stmt = select(SourceMetadata).where(SourceMetadata.resource_id == resource_id)
         src_meta = (await session.exec(stmt)).first()
@@ -149,25 +140,6 @@ async def get_resource(
                 "source_id": src_meta.source_id,
                 "raw": src_meta.raw_payload,
             }
-
-    # 4. Hydrate series items if type is series
-    if "items" in aspects and resource.type == "series":
-        stmt = select(SeriesItem).where(SeriesItem.parent_series_id == resource_id).order_by(SeriesItem.order_index)
-        items = (await session.exec(stmt)).all()
-        item_list = []
-        for it in items:
-            child = await session.get(Resource, it.child_resource_id)
-            if child:
-                item_list.append({
-                    "order_index": it.order_index,
-                    "resource_id": child.id,
-                    "title": child.title,
-                    "type": child.type,
-                    "data": child.data,
-                })
-        res_read.items = item_list
-        # Also keep items inside data["items"] for type-specific purity
-        res_read.data["items"] = item_list
 
     return res_read
 

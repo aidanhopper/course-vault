@@ -1,6 +1,16 @@
 import pytest
 from sqlmodel import select
-from vault.db.models import Job, Resource, SeriesItem, SourceMetadata, Topic, TranscriptCue, generate_id
+from vault.db.models import (
+    Collection,
+    CollectionItem,
+    Job,
+    Resource,
+    SeriesItem,
+    SourceMetadata,
+    Topic,
+    TranscriptCue,
+    generate_id,
+)
 from vault.db.session import async_session_maker, init_db
 
 
@@ -73,9 +83,33 @@ async def test_models_crud():
         )
         session.add(job)
 
+        # Create Collection and CollectionItem
+        col = Collection(
+            id=generate_id("col"),
+            title="MIT 6.006",
+            context="course",
+        )
+        col.data = {"institution": "MIT"}
+        session.add(col)
+
+        c_item = CollectionItem(
+            collection_id=col.id,
+            resource_id=video.id,
+            context="lecture_video",
+            order_index=1,
+        )
+        session.add(c_item)
+
         await session.commit()
 
         # Query back and verify
+        fetched_col = await session.get(Collection, col.id)
+        assert fetched_col is not None
+        assert fetched_col.context == "course"
+
+        ci_list = (await session.exec(select(CollectionItem).where(CollectionItem.collection_id == col.id))).all()
+        assert len(ci_list) == 1
+        assert ci_list[0].context == "lecture_video"
         fetched_series = await session.get(Resource, series.id)
         assert fetched_series is not None
         assert fetched_series.type == "series"
