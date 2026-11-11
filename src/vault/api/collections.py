@@ -1,8 +1,9 @@
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from vault.api.resources import sanitize_resource_data_for_api
 from vault.db.models import Collection, CollectionItem, Resource
 from vault.db.session import get_session
 from vault.schemas.collection import (
@@ -13,6 +14,16 @@ from vault.schemas.collection import (
 )
 
 router = APIRouter(prefix="/collections", tags=["Collections"])
+
+
+def sanitize_collection_data_for_api(raw_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Strips internal filesystem folder paths and duplicate arrays from public Collection responses."""
+    api_data = raw_data.copy()
+    api_data.pop("folder_path", None)
+    api_data.pop("slides", None)
+    api_data.pop("documents", None)
+    api_data.pop("homework", None)
+    return api_data
 
 
 @router.get("", response_model=List[CollectionRead], response_model_exclude_none=True, summary="List collections")
@@ -33,7 +44,7 @@ async def list_collections(
             id=c.id,
             title=c.title,
             context=c.context,
-            data=c.data,
+            data=sanitize_collection_data_for_api(c.data),
             created_at=c.created_at,
             updated_at=c.updated_at,
         )
@@ -59,7 +70,7 @@ async def create_collection(
         id=collection.id,
         title=collection.title,
         context=collection.context,
-        data=collection.data,
+        data=sanitize_collection_data_for_api(collection.data),
         created_at=collection.created_at,
         updated_at=collection.updated_at,
         items=[],
@@ -92,7 +103,7 @@ async def get_collection(
                 order_index=it.order_index,
                 title=resource.title if resource else None,
                 type=resource.type if resource else None,
-                data=resource.data if resource else None,
+                data=sanitize_resource_data_for_api(it.resource_id, resource.data) if resource else None,
             )
         )
 
@@ -100,7 +111,7 @@ async def get_collection(
         id=collection.id,
         title=collection.title,
         context=collection.context,
-        data=collection.data,
+        data=sanitize_collection_data_for_api(collection.data),
         created_at=collection.created_at,
         updated_at=collection.updated_at,
         items=populated_items,

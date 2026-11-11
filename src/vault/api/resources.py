@@ -17,6 +17,27 @@ from vault.schemas.transcript import TranscriptCueRead
 router = APIRouter(prefix="/resources", tags=["Resources"])
 
 
+def sanitize_resource_data_for_api(resource_id: str, raw_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Strips internal server paths and scraping artifacts, replacing them with clean public media URLs."""
+    api_data = raw_data.copy()
+    api_data.pop("file_path", None)
+    api_data.pop("slides_file_path", None)
+    api_data.pop("slides_resource_id", None)
+    api_data.pop("slides_url", None)
+    api_data.pop("resources_url", None)
+    api_data.pop("source_url", None)
+    api_data.pop("course_url", None)
+    api_data.pop("folder_path", None)
+    api_data.pop("jellyfin_item_id", None)
+    api_data.pop("jellyfin_series_id", None)
+
+    # Provide direct, actionable streaming link if resource has media
+    if "file_path" in raw_data or "duration_seconds" in raw_data or "slide_count" in raw_data or "page_count" in raw_data:
+        api_data["media_url"] = f"/api/v1/resources/{resource_id}/media"
+
+    return api_data
+
+
 class AddResourceItemRequest(BaseModel):
     resource_id: str
     order_index: int
@@ -41,7 +62,7 @@ async def list_resources(
             id=r.id,
             type=r.type,
             title=r.title,
-            data=r.data,
+            data=sanitize_resource_data_for_api(r.id, r.data),
             created_at=r.created_at,
             updated_at=r.updated_at,
         )
@@ -68,7 +89,7 @@ async def create_resource(
         id=resource.id,
         type=resource.type,
         title=resource.title,
-        data=resource.data,
+        data=sanitize_resource_data_for_api(resource.id, resource.data),
         created_at=resource.created_at,
         updated_at=resource.updated_at,
         items=[],
@@ -94,7 +115,7 @@ async def get_resource(
         id=resource.id,
         type=resource.type,
         title=resource.title,
-        data=resource.data,
+        data=sanitize_resource_data_for_api(resource.id, resource.data),
         created_at=resource.created_at,
         updated_at=resource.updated_at,
     )
