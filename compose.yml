@@ -14,39 +14,23 @@ services:
       - AI_BASE_URL=${AI_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai/}
       - AI_MODEL=${AI_MODEL:-gemini-3.5-flash-lite}
 
-      # Storage paths inside container
-      - VAULT_DATA_DIR=/data
-      - MEDIA_DIR=/media
-      - DATABASE_URL=sqlite+aiosqlite:////data/vault.db
+      # Storage paths on the NFS export (/srv/media/vault/{data, media})
+      - VAULT_DATA_DIR=/srv/media/vault/data
+      - MEDIA_DIR=/srv/media/vault/media
+      - DATABASE_URL=sqlite+aiosqlite:////srv/media/vault/data/vault.db
 
       # Optional Jellyfin webhook for auto-library refresh
       - JELLYFIN_URL=${JELLYFIN_URL:-}
       - JELLYFIN_API_KEY=${JELLYFIN_API_KEY:-}
     volumes:
-      # NFS Volumes for /srv/media export: /srv/media/vault/{data, media}
-      - nfs-vault-data:/data
-      - nfs-vault-media:/media
-
-      # ---------------------------------------------------------------------
-      # ALTERNATIVE: If /srv/media is already mounted on the Docker host OS,
-      # comment out the nfs named volumes above and use direct host paths:
-      # ---------------------------------------------------------------------
-      # - /srv/media/vault/data:/data
-      # - /srv/media/vault/media:/media
+      # Mount the root /srv/media NFS export directly
+      - nfs-storage:/srv/media
 
 volumes:
-  # Native Docker NFS Mount for /srv/media/vault/data
-  nfs-vault-data:
+  # Native Docker NFS Mount for /srv/media
+  nfs-storage:
     driver: local
     driver_opts:
       type: nfs
       o: "addr=${NFS_SERVER:-192.168.0.86},rw,nfsvers=4"
-      device: ":/srv/media/vault/data"
-
-  # Native Docker NFS Mount for /srv/media/vault/media
-  nfs-vault-media:
-    driver: local
-    driver_opts:
-      type: nfs
-      o: "addr=${NFS_SERVER:-192.168.0.86},rw,nfsvers=4"
-      device: ":/srv/media/vault/media"
+      device: ":/srv/media"
