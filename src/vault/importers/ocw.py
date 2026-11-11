@@ -276,7 +276,7 @@ async def process_ocw_import(
             instructor_hint="MIT OpenCourseWare",
             playlist_description=syllabus_info.get("syllabus_snippet"),
         )
-        final_title = title_override or (course_col.title if course_col else cleaned_meta.series_title)
+        final_title = title_override or cleaned_meta.series_title
 
         if not course_col:
             stmt_col = select(Collection).where(Collection.title == final_title)
@@ -563,34 +563,48 @@ async def process_ocw_import(
             except Exception as e:
                 logger.warning(f"Error reading PDF {file_path}: {e}")
 
-            # Create or update slides Resource in DB
-            slide_res_id = generate_id("res")
-            slide_res = Resource(
-                id=slide_res_id,
-                type="slides",
-                title=f"{course_col.title} - Lecture {lec_idx:02d} Slides: {lec_title}",
-            )
-            slide_res.data = {
-                "lecture_index": lec_idx,
-                "slide_count": page_count,
-                "file_format": "pdf",
-                "file_path": str(file_path.relative_to(settings.MEDIA_DIR)),
-                "institution": "MIT",
-                "source_url": pdf_url,
-            }
+            # Check if slide resource already exists in DB
+            slide_res_id = None
+            async with async_session_maker() as session:
+                stmt_s = select(Resource).where(Resource.type == "slides")
+                for s in (await session.exec(stmt_s)).all():
+                    if s.data.get("source_url") == pdf_url or s.data.get("lecture_index") == lec_idx:
+                        s.title = f"{course_col.title} - Lecture {lec_idx:02d} Slides: {lec_title}"
+                        slide_res_id = s.id
+                        session.add(s)
+                        await session.commit()
+                        break
+
+            if not slide_res_id:
+                slide_res_id = generate_id("res")
+                slide_res = Resource(
+                    id=slide_res_id,
+                    type="slides",
+                    title=f"{course_col.title} - Lecture {lec_idx:02d} Slides: {lec_title}",
+                )
+                slide_res.data = {
+                    "lecture_index": lec_idx,
+                    "slide_count": page_count,
+                    "file_format": "pdf",
+                    "file_path": str(file_path.relative_to(settings.MEDIA_DIR)),
+                    "institution": "MIT",
+                    "source_url": pdf_url,
+                }
+
+                async with async_session_maker() as session:
+                    session.add(slide_res)
+                    for top in extracted_topics:
+                        t_record = Topic(
+                            resource_id=slide_res_id,
+                            title=top["title"],
+                            start_page=top["start_page"],
+                            end_page=top["end_page"],
+                            order_index=top["order_index"],
+                        )
+                        session.add(t_record)
+                    await session.commit()
 
             async with async_session_maker() as session:
-                session.add(slide_res)
-                for top in extracted_topics:
-                    t_record = Topic(
-                        resource_id=slide_res_id,
-                        title=top["title"],
-                        start_page=top["start_page"],
-                        end_page=top["end_page"],
-                        order_index=top["order_index"],
-                    )
-                    session.add(t_record)
-
                 # Pair directly with Video resource in Collection if matching order_index
                 stmt_v = select(CollectionItem).where(
                     CollectionItem.collection_id == target_collection_id,
@@ -661,31 +675,44 @@ async def process_ocw_import(
                     logger.warning(f"Error downloading homework {file_url}: {e}")
                     continue
 
-            hw_res_id = generate_id("res")
-            hw_res = Resource(
-                id=hw_res_id,
-                type="document",
-                title=f"{course_col.title} - {hw_title}",
-            )
-            hw_res.data = {
-                "file_format": ext.lstrip("."),
-                "file_path": str(file_path.relative_to(settings.MEDIA_DIR)),
-                "is_solution": hw["is_solution"],
-                "institution": "MIT",
-                "source_url": file_url,
-            }
-
+            # Check if homework resource already exists in DB
+            hw_res_id = None
             async with async_session_maker() as session:
-                session.add(hw_res)
-                # Link to Collection with context 'solution' or 'problem_set'
-                c_item = CollectionItem(
-                    collection_id=target_collection_id,
-                    resource_id=hw_res_id,
-                    context="solution" if hw["is_solution"] else "problem_set",
-                    order_index=completed_count + 1,
+                stmt_d = select(Resource).where(Resource.type == "document")
+                for d in (await session.exec(stmt_d)).all():
+                    if d.data.get("source_url") == file_url:
+                        d.title = f"{course_col.title} - {hw_title}"
+                        hw_res_id = d.id
+                        session.add(d)
+                        await session.commit()
+                        break
+
+            if not hw_res_id:
+                hw_res_id = generate_id("res")
+                hw_res = Resource(
+                    id=hw_res_id,
+                    type="document",
+                    title=f"{course_col.title} - {hw_title}",
                 )
-                session.add(c_item)
-                await session.commit()
+                hw_res.data = {
+                    "file_format": ext.lstrip("."),
+                    "file_path": str(file_path.relative_to(settings.MEDIA_DIR)),
+                    "is_solution": hw["is_solution"],
+                    "institution": "MIT",
+                    "source_url": file_url,
+                }
+
+                async with async_session_maker() as session:
+                    session.add(hw_res)
+                    # Link to Collection with context 'solution' or 'problem_set'
+                    c_item = CollectionItem(
+                        collection_id=target_collection_id,
+                        resource_id=hw_res_id,
+                        context="solution" if hw["is_solution"] else "problem_set",
+                        order_index=completed_count + 1,
+                    )
+                    session.add(c_item)
+                    await session.commit()
 
             downloaded_homework.append({
                 "resource_id": hw_res_id,
