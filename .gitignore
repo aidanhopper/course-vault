@@ -11,8 +11,8 @@ wheels/
 
 # Storage and environment
 .env
-data/
-media/
+/data/
+/media/
 *.db
 *.db-journal
 .pytest_cache/
