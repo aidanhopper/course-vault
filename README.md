@@ -64,7 +64,7 @@ AI_API_KEY=AIzaSy...your_gemini_key
 AI_MODEL=gemini-3.5-flash-lite
 ```
 
-### 2. Configure `docker-compose.yml`
+### 2. Configure `compose.yml`
 Point the media volume to your NFS mount path on the host:
 ```yaml
 volumes:
