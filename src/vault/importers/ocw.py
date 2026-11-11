@@ -273,7 +273,7 @@ async def process_ocw_import(
         cleaned_meta = await clean_series_metadata(
             raw_series_title=raw_slug_title,
             raw_video_titles=sample_titles,
-            instructor_hint="MIT OpenCourseWare",
+            uploader="MIT OpenCourseWare",
             playlist_description=syllabus_info.get("syllabus_snippet"),
         )
         final_title = title_override or cleaned_meta.series_title

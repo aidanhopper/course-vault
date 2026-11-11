@@ -53,7 +53,7 @@ class BatchCourseResult(BaseModel):
 async def clean_series_metadata(
     raw_series_title: str,
     raw_video_titles: List[str],
-    instructor_hint: Optional[str] = None,
+    uploader: Optional[str] = None,
     playlist_description: Optional[str] = None,
 ) -> CleanedSeriesResult:
     """
@@ -67,7 +67,8 @@ async def clean_series_metadata(
         inst_match = re.search(r"\bInstructors?:\s*([^\n\r]+)", playlist_description, flags=re.IGNORECASE)
         if inst_match:
             fallback_inst = inst_match.group(1).strip()
-    fallback_inst = fallback_inst or instructor_hint
+    fallback_inst = fallback_inst or uploader
+    fallback_institution = "MIT" if ("mit" in (uploader or "").lower() or "mit" in raw_series_title.lower()) else uploader
 
     fallback_video_titles = [
         clean_title_fallback(title, index=idx + 1)
@@ -78,7 +79,7 @@ async def clean_series_metadata(
     if not settings.AI_API_KEY:
         return CleanedSeriesResult(
             series_title=fallback_series_title,
-            institution=uploader,
+            institution=fallback_institution,
             instructors=[fallback_inst] if fallback_inst else [],
             overview=f"Lectures for {fallback_series_title}.",
             video_titles=fallback_video_titles,
@@ -90,7 +91,7 @@ async def clean_series_metadata(
 Clean and normalize the following course playlist:
 
 Raw Course/Series Title: {raw_series_title}
-Instructor/Channel Hint: {instructor_hint or 'Unknown'}
+Instructor/Channel Hint: {uploader or 'Unknown'}
 Playlist Description:
 {desc_snippet}
 
@@ -155,7 +156,7 @@ Respond ONLY with valid JSON in this structure:
         logger.warning(f"AI metadata cleanup failed ({e}); using regex heuristic fallback")
         return CleanedSeriesResult(
             series_title=fallback_series_title,
-            institution=uploader,
+            institution=fallback_institution,
             instructors=[fallback_inst] if fallback_inst else [],
             overview=f"Course lectures for {fallback_series_title}.",
             video_titles=fallback_video_titles,

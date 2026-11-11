@@ -153,7 +153,7 @@ async def process_youtube_import(
     cleaned_meta = await clean_series_metadata(
         raw_series_title=title_override or raw_series_title,
         raw_video_titles=raw_video_titles,
-        instructor_hint=uploader,
+        uploader=uploader,
         playlist_description=raw_info.get("description"),
     )
 
